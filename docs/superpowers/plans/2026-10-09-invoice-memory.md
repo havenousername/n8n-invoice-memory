@@ -4,9 +4,9 @@
 
 **Goal:** Build the booth demo: invoice PDFs become one progressively sharpening Qdrant point per customer, shown on a live manager dashboard, driven by n8n Cloud workflows.
 
-**Architecture:** Two n8n Data Tables are the source of truth; a Rebuild sub-workflow turns them into one Qdrant point per customer with three Cloud-Inference vectors, called after every processing stage. A static dashboard polls two n8n read webhooks and calls one write webhook. Scripts in the repo create the collection, generate synthetic PDFs, and smoke-test the Qdrant request shapes before any workflow is built.
+**Architecture:** Two n8n Data Tables are the source of truth; a Rebuild sub-workflow turns them into one Qdrant point per customer with three Cloud-Inference vectors, called after every processing stage. A static dashboard polls two n8n read webhooks and calls one write webhook. Python scripts in `scripts/` create the collection, hold the reference request bodies, and smoke-test them before any workflow is built; `samples/` generates the synthetic PDFs.
 
-**Tech Stack:** n8n Cloud (Form Trigger, Data Table, Crypto, Extract from File, HTTP Request, Code, Execute Sub-workflow, Webhook, Respond to Webhook, Schedule Trigger), Qdrant Cloud with Cloud Inference, OpenRouter (HTTP), bash + curl + python3 stdlib for scripts, Node (`node --test`) for the Code-node sources and the dashboard logic, headless Chrome for PDFs.
+**Tech Stack:** n8n Cloud (Form Trigger, Data Table, Crypto, Extract from File, HTTP Request, Code, Execute Sub-workflow, Webhook, Respond to Webhook, Schedule Trigger), Qdrant Cloud with Cloud Inference, OpenRouter (HTTP), Python 3.11+ standard library for scripts (`unittest` for their tests), bash only for the headless Chrome print loop, Node (`node --test`) for the Code-node sources and the dashboard logic, headless Chrome for PDFs.
 
 **Spec:** `docs/superpowers/specs/2026-10-09-invoice-memory-design.md`
 
@@ -24,7 +24,7 @@ Numbering note: the spec's "04 Dashboard API" is split here into `04 Dashboard r
 - Synthetic data only. The Form has no file field.
 - Latency targets: list under 300 ms, search under 500 ms, measured in n8n around the Qdrant call and returned as `latency_ms`.
 - Writing in README, cards, script: American English, Oxford comma, no em dashes, Title Case headings.
-- Commit after every task with the attribution line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Commit after every task, ending the message with the current session's attribution lines.
 
 ### Execution Gates and Data Ownership
 
@@ -36,6 +36,22 @@ Numbering note: the spec's "04 Dashboard API" is split here into `04 Dashboard r
 - No distributed lock is introduced. Submit one sample at a time and await completion during booth operation. Overlapping runs can leave a stale final Qdrant write; after all writers finish, manually run Rebuild and regenerate the narrative from current rows. Do not claim automatic convergence without a later rebuild. Run purge only while ingest, processing, and restore are stopped.
 - Keep every canvas within 15 actual nodes, counting Config, validation, branch, merge, loop, and error nodes. If gates require additional nodes, extract a named helper sub-workflow and include its import/binding in README; never hide multiple nodes in one table row.
 
+### Script Rules
+
+Every Python file under `scripts/` follows these rules; review rejects a script that breaks one. Tasks state each script's interface and test cases, and the code lives only in the repo, so the plan cannot drift from it.
+
+1. Python 3.11 or later, standard library only. No pip.
+2. One responsibility per module. A runnable script is a thin `main(argv) -> int` that parses arguments, loads settings, wires the real adapters, calls the core, prints, and returns an exit code. Only `main` touches `sys.argv`, the environment, the clock, the filesystem, or the network.
+3. Functional core, I/O shell. Functions that build request bodies, compare schemas, or judge responses take data and return data. Time arrives as an argument (`now_iso`).
+4. Dependencies are passed in. Qdrant access is a `QdrantCall` and HTTP is a `Send`; only `main` builds the real ones, and tests pass fakes. No other seams: a seam exists only where a real and a fake adapter both exist.
+5. Importing a module has no side effects. Entry points sit under `if __name__ == "__main__": sys.exit(main())`. No module-level mutable state.
+6. Typed signatures on every public function. Settings and results are frozen dataclasses. Core code raises a specific exception (`MissingSetting`, `HttpError`, `SchemaDrift`, `SmokeFailure`, and so on); only `main` turns it into a one-line message on stderr and a nonzero exit.
+7. Composition over inheritance. No class hierarchies, so substitutability holds by construction; exception types are the only subclasses.
+8. Every module with logic has `scripts/test_<module>.py` (`unittest`, no network). Scripts that call live services are acceptance checks and say so in their docstring.
+9. Flat imports (`from env import load_settings`). `scripts/` is not a package; each script runs as `python3 scripts/<name>.py` from any working directory, and tests run with `python3 -m unittest discover -s scripts`.
+10. No `eval`, no shell-outs, no JSON built by string concatenation. Bodies are dicts, serialized once in `transport`.
+11. Anything destructive is name-guarded: only the smoke script deletes a collection, and only one with its own prefix.
+
 ## Review Focus
 
 1. A PDF whose text extraction is empty (scanned image) must still yield a point: stage 1, amount `null`, digest line with `?`, aggregates exclude it, no crash. Pinned in Task 4 (`view.test.js`, "empty regex fields").
@@ -46,26 +62,24 @@ Numbering note: the spec's "04 Dashboard API" is split here into `04 Dashboard r
 
 ---
 
-### Task 1: Repo Scaffold and Qdrant Setup Script
+### Task 1: Repo Scaffold, Shared Script Modules, and Collection Setup
 
 **Files:**
-- Create: `.gitignore`, `.env.example`, `LICENSE` (Apache-2.0, same as Clelia's `AstraBert/n8n-discord-bot` so the two booth repos match), `qdrant/lib.sh`, `qdrant/setup.sh`
-- Test: manual run against the cluster, twice
+- Done: `.gitignore` (commit `736caea`)
+- Create: `.env.example`, `LICENSE` (Apache-2.0, same as Clelia's `AstraBert/n8n-discord-bot` so the two booth repos match)
+- Create: `scripts/env.py`, `scripts/transport.py`, `scripts/qdrant_api.py`, `scripts/schema.py`, `scripts/setup_collection.py`
+- Test: `scripts/test_env.py`, `scripts/test_transport.py`, `scripts/test_qdrant_api.py`, `scripts/test_schema.py`, `scripts/test_setup_collection.py`; then two live runs against the cluster
 
-**Interfaces:**
-- Produces: `qdrant/lib.sh` exporting `q()` = `q <METHOD> <path> [json-body]` that curls `$QDRANT_URL$path` with the `api-key` header and prints the response body. Every later script sources it.
+**Interfaces** (every later script builds on these):
+- `env.py`: `parse_dotenv(text: str) -> dict[str, str]`; `load_settings(required: Iterable[str], env_file: Path = <repo>/.env, environ: Mapping[str, str] = os.environ) -> Settings`. `Settings` is a frozen dataclass with `qdrant_url`, `qdrant_api_key`, `openrouter_api_key`, `openrouter_model`, `pdf_engine` (default `native`), `n8n_base_url`. Real environment variables override the file. A missing file is fine. Missing or empty required keys raise `MissingSetting` naming all of them. URLs lose a trailing slash. A non-comment line without `=` raises `ValueError` with its line number.
+- `transport.py`: `send(method: str, url: str, *, headers: Mapping[str, str] | None = None, body: Any = None, timeout: float = 30.0) -> Any`. Serializes `body` as JSON, returns the decoded JSON response, or `None` for an empty body. Non-2xx raises `HttpError` carrying `status`, decoded `body`, `method`, and `url`. Network failure, timeout, or a non-JSON 2xx body raises `TransportError`. Type alias `Send` is this signature.
+- `qdrant_api.py`: `connect(settings: Settings, send: Send = transport.send) -> QdrantCall`, where `QdrantCall = Callable[[str, str, Any], Any]` is `call(method, path, body=None)`. It prefixes `settings.qdrant_url`, adds the `api-key` header, and returns the response's `result` field. `HttpError` propagates unchanged.
+- `schema.py`: constants `COLLECTION = "customers"`, `SHARD_KEYS = ("m_anna", "m_ben")`, `MODELS` (`summary`, `digest`, `bm25` mapped to the three exact model strings), `PAYLOAD_INDEXES` (the nine field schemas below, in order). Pure functions: `collection_spec() -> dict` (the `PUT /collections/{name}` body); `drift(info: dict) -> list[str]` (human-readable mismatches between a `GET /collections/{name}` result and the spec, `[]` when compatible); `missing_indexes(info: dict) -> list[str]`.
+- `setup_collection.py`: `ensure_collection(call: QdrantCall, name: str = COLLECTION) -> list[str]` returns the actions it took (`[]` when nothing was missing). Raises `SchemaDrift(mismatches)` before any write when an existing collection is incompatible, and again if the state read back after writing is still incomplete. `main(argv) -> int` accepts `--collection NAME`.
 
-- [ ] **Step 1: Write `.gitignore` and `.env.example`**
+Payload indexes, in order: `manager_id` keyword with `is_tenant: true`; `worker_id` keyword; `customer_id` keyword; `deleted_at` datetime; `last_invoice_at` datetime; `updated_at` datetime; `stage` integer; `invoices[].status` keyword; `invoices[].amount` float.
 
-```gitignore
-.env
-samples/html/
-*.pdf
-!samples/*.pdf
-node_modules/
-__pycache__/
-edge/data/
-```
+- [ ] **Step 1: Write `.env.example`**
 
 ```bash
 # .env.example  (copy to .env, never commit .env)
@@ -73,201 +87,136 @@ QDRANT_URL=https://xxxx.cloud.qdrant.io:6333
 QDRANT_API_KEY=
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=google/gemini-2.5-flash
+PDF_ENGINE=native
 N8N_BASE_URL=https://yourname.app.n8n.cloud
 ```
 
-- [ ] **Step 2: Write `qdrant/lib.sh`**
+- [ ] **Step 2: Write the failing tests** (stdlib `unittest`, no network)
 
-```bash
-#!/usr/bin/env bash
-# source this; needs QDRANT_URL and QDRANT_API_KEY in the environment
-set -euo pipefail
-: "${QDRANT_URL:?set QDRANT_URL}"; : "${QDRANT_API_KEY:?set QDRANT_API_KEY}"
-q() {  # q METHOD /path [json]
-  local m=$1 p=$2 body=${3:-}
-  if [ -n "$body" ]; then
-    curl --fail-with-body -sS -X "$m" "$QDRANT_URL$p" -H "api-key: $QDRANT_API_KEY" -H 'content-type: application/json' -d "$body"
-  else
-    curl --fail-with-body -sS -X "$m" "$QDRANT_URL$p" -H "api-key: $QDRANT_API_KEY"
-  fi
-  echo
-}
-ok() { python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get("status")=="ok" else 1)'; }
-```
+`test_env.py`:
+- parses `KEY=value`, skips blank lines and `#` comments, strips one pair of matching surrounding quotes, keeps `=` inside a value
+- a line without `=` raises `ValueError` naming the line number
+- environment overrides the file; a nonexistent file with keys in the environment works
+- missing and empty required keys raise one `MissingSetting` naming every missing key
+- `QDRANT_URL` and `N8N_BASE_URL` lose a trailing slash; `pdf_engine` defaults to `native`
 
-- [ ] **Step 3: Write `qdrant/setup.sh`** (idempotent: tolerates "already exists")
+`test_transport.py` (a stdlib `http.server` on `127.0.0.1`, ephemeral port, in a thread):
+- 200 with a JSON body is decoded; the request carried the JSON body, `content-type: application/json`, and the passed headers
+- 404 raises `HttpError` with `status == 404` and the decoded error body
+- an empty 2xx body returns `None`
+- a non-JSON 2xx body raises `TransportError`
+- a refused connection raises `TransportError`
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"; set -a; [ -f ../.env ] && . ../.env; set +a
-. ./lib.sh
-C=/collections/customers
+`test_qdrant_api.py` (fake `send` that records its arguments):
+- calls `QDRANT_URL + path` with the `api-key` header and the given body, returns `result`
+- `HttpError` from `send` propagates unchanged
 
-SETUP_TMP=$(mktemp -d)
-trap 'rm -rf "$SETUP_TMP"' EXIT
-HTTP_CODE=$(curl -sS -o "$SETUP_TMP/collection.json" -w '%{http_code}' "$QDRANT_URL$C" -H "api-key: $QDRANT_API_KEY")
-if [ "$HTTP_CODE" = 200 ]; then
-  ok < "$SETUP_TMP/collection.json"
-  echo "collection exists"
-elif [ "$HTTP_CODE" = 404 ]; then
-q PUT $C '{
-  "vectors": {
-    "summary": {"size": 384, "distance": "Cosine"},
-    "digest":  {"size": 96,  "distance": "Cosine", "multivector_config": {"comparator": "max_sim"}}
-  },
-  "sparse_vectors": {"bm25": {"modifier": "idf"}},
-  "sharding_method": "custom"
-}' | ok
-else
-  cat "$SETUP_TMP/collection.json" >&2
-  exit 1
-fi
+`test_schema.py`:
+- `collection_spec()` has `summary` 384 Cosine, `digest` 96 Cosine with `max_sim`, sparse `bm25` with `idf`, `sharding_method: custom`
+- `drift()` of an info dict shaped like Qdrant's `GET /collections/{name}` result for the spec is `[]`
+- `drift()` reports, one line each: wrong size, wrong distance, missing multivector comparator, missing sparse modifier, sharding not custom, an existing index with the wrong `data_type`, `manager_id` without `is_tenant`
+- `missing_indexes()` lists absent fields in `PAYLOAD_INDEXES` order
 
-EXISTING_KEYS=$(q GET "$C/shards")
-printf '%s' "$EXISTING_KEYS" | ok
-for k in m_anna m_ben; do
-  if printf '%s' "$EXISTING_KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if any(s["key"]==sys.argv[1] for s in d["result"]["shard_keys"]) else 1)' "$k"; then
-    echo "shard key exists: $k"
-  else
-    q PUT "$C/shards" "{\"shard_key\": \"$k\"}" | ok
-  fi
-done
+`test_setup_collection.py` (an in-memory fake `QdrantCall` that stores collections, shard keys, and indexes, and records every call):
+- empty cluster: creates the collection, both shard keys, and nine indexes, returning those actions; a second run returns `[]` and makes only reads
+- compatible collection missing one shard key and one index: creates exactly those two
+- drifted collection: raises `SchemaDrift` listing the mismatches, makes no write
+- a non-404 `HttpError` on the first read propagates (an auth failure is not a missing collection)
+- a fake that ignores `sharding_method` on create: the read-back raises `SchemaDrift`
 
-idx() { q PUT "$C/index?wait=true" "{\"field_name\": \"$1\", \"field_schema\": $2}" | ok; }
-idx manager_id        '{"type":"keyword","is_tenant":true}'
-idx worker_id         '{"type":"keyword"}'
-idx customer_id       '{"type":"keyword"}'
-idx deleted_at        '{"type":"datetime"}'
-idx last_invoice_at   '{"type":"datetime"}'
-idx updated_at        '{"type":"datetime"}'
-idx stage             '{"type":"integer"}'
-idx 'invoices[].status' '{"type":"keyword"}'
-idx 'invoices[].amount' '{"type":"float"}'
-q GET $C | python3 -c 'import sys,json; d=json.load(sys.stdin)["result"]; print("indexes:", sorted(d["payload_schema"].keys())); print("sharding:", d["config"]["params"].get("sharding_method"))'
-```
+- [ ] **Step 3: Run the tests, verify they fail**
 
-- [ ] **Step 4: Run it twice**
+Run: `python3 -m unittest discover -s scripts`
+Expected: every test module errors with `ModuleNotFoundError`.
 
-Run: `chmod +x qdrant/*.sh && qdrant/setup.sh && qdrant/setup.sh`
-Expected: first run prints `indexes: [...9 names...]` and `sharding: custom`; second run prints `collection exists` then the same two lines. If the cluster rejects `sharding_method: custom`, delete that line and both `shards` calls, remove `shard_key` from every later body, and note it in the README; the Edge plan is then cut.
+- [ ] **Step 4: Implement the five modules**
 
-The shard listing above follows [Qdrant's list-shard-keys response](https://api.qdrant.tech/api-reference/distributed/list-shard-keys). Confirm this API on the actual cluster version. Setup must also assert existing vector dimensions, distances, multivector comparator, sparse modifier, shard mode, and index schemas; a incompatible existing collection fails with an actionable message rather than silently passing. The payload-only fallback requires consistent removal of shard_key in scripts and workflows and all tenant payload filters retained; unsupported permissions or authentication failures are not evidence that sharding is unavailable.
+`ensure_collection` runs in this order: read the collection (404 means create it from `collection_spec()`); compare with `drift()` and stop on any mismatch; read `GET /collections/{name}/shards` and create each missing key with `PUT /collections/{name}/shards`; create each of `missing_indexes()` with `PUT /collections/{name}/index?wait=true`; read the collection and shard keys back and raise `SchemaDrift` unless drift, missing indexes, and missing keys are all empty. `main` prints each action, then `customers ok: custom sharding, shard keys m_anna m_ben, 9 indexes`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the tests, verify they pass**
+
+Run: `python3 -m unittest discover -s scripts`
+Expected: `OK`.
+
+- [ ] **Step 6: Run against the cluster twice** (first live write; confirm before running)
+
+Run: `python3 scripts/setup_collection.py && python3 scripts/setup_collection.py`
+Expected: the first run prints the collection, two shard keys, and nine indexes as created, then the `ok` line; the second run prints only the `ok` line.
+
+The shard listing follows [Qdrant's list-shard-keys response](https://api.qdrant.tech/api-reference/distributed/list-shard-keys). If the cluster rejects `sharding_method: custom`, stop: the payload-only fallback removes `shard_key` from every body in `bodies.py` and every workflow, keeps every tenant payload filter, is noted in the README, and cuts the Edge plan. An authentication or permission failure is not evidence that sharding is unavailable.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 curl -sSL https://www.apache.org/licenses/LICENSE-2.0.txt -o LICENSE
-git add .gitignore .env.example LICENSE qdrant/lib.sh qdrant/setup.sh
-git commit -m "feat(qdrant): collection setup script with shard keys and indexes
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add .env.example LICENSE scripts
+git commit -m "feat(scripts): settings, transport, collection schema, and idempotent setup"
 ```
 
 ---
 
-### Task 2: Smoke Test of Every Qdrant Request Shape
+### Task 2: Reference Request Bodies and the Smoke Test
 
 **Files:**
-- Create: `qdrant/smoke.sh`
-- Test: the script is the test
+- Create: `scripts/bodies.py`, `scripts/smoke.py`, `scripts/test_bodies.py`, `scripts/test_smoke.py`
+- Test: unit tests, then `python3 scripts/smoke.py` against the cluster
 
 **Interfaces:**
-- Produces: the exact JSON bodies that Tasks 6, 7, 8, 10, and 11 paste into HTTP Request nodes. Treat `smoke.sh` as the source of truth for request shapes.
+- `bodies.py` is the source of truth for every Qdrant request shape. Tasks 6, 8, and 11 rebuild these bodies in n8n expressions and must produce the same JSON; `python3 scripts/bodies.py` prints each one with sample arguments for comparison. Pure functions, each returning a dict:
+  - `upsert(manager: str, point_id: str, payload: dict, texts: Mapping[str, str]) -> dict`: one point, three inference vectors using `schema.MODELS`
+  - `live_scroll(manager: str, overdue_gte: float | None = None, limit: int = 50) -> dict`: tenant match, `is_empty deleted_at`, ordered by `last_invoice_at` desc; adds the nested `invoices` filter (status overdue and amount `gte`) only when `overdue_gte is not None`, so `0` is a real threshold
+  - `removed_scroll(manager: str, limit: int = 50) -> dict`: tenant match, `must_not is_empty deleted_at`
+  - `customer_scroll(manager: str, customer: str) -> dict`: one point by tenant and slug, full payload
+  - `hybrid_query(manager: str, text: str, now_iso: str, limit: int = 5) -> dict`: the spec section 11 request, `with_payload: ["customer_id", "invoices"]`
+  - `purge(manager: str, customer: str, cutoff_iso: str) -> dict`: delete filter on `manager_id`, `customer_id`, and `deleted_at` range `lt` cutoff
+- `smoke.py` (acceptance script): `smoke_collection_name(now_iso: str, suffix: str) -> str` returns `invoice_memory_smoke_<yyyymmddHHMMSS>_<suffix>`; `fixture_points(now_iso: str) -> list[tuple[str, dict]]` returns (manager, point) pairs; `run_smoke(call: QdrantCall, collection: str, now_iso: str) -> list[str]` returns the names of passed checks or raises `SmokeFailure(check, detail)`; `drop_smoke_collection(call, name)` raises `ValueError` for any name without the smoke prefix, including `customers`. `main` always drops the collection in `finally`.
 
-- [ ] **Step 1: Write `qdrant/smoke.sh`**
+Fixtures:
+- `m_anna/smoke`: one overdue invoice of 12300.00, items "Hetzner servers"
+- `m_anna/decoy`: an overdue invoice of 500.00 and a paid invoice of 20000.00 (each condition holds on a different invoice, so the nested filter must reject it)
+- `m_ben/smoke`: the same slug under the other manager, an overdue invoice of 15000.00
 
-```bash
-#!/usr/bin/env bash
-# Seeds one point with inference, runs the nested filter and the section 11 query, cleans up.
-set -euo pipefail
-cd "$(dirname "$0")"; set -a; [ -f ../.env ] && . ../.env; set +a
-. ./lib.sh
-C=/collections/invoice_memory_smoke_$(date -u +%Y%m%d%H%M%S)_$$
-# Create this disposable collection with Task 1's vectors, shards, and indexes.
-# Guard cleanup by exact generated collection name, never use /collections/customers.
-trap 'q DELETE "$C" | ok' EXIT
-ID=11111111-1111-4111-8111-111111111111
-NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+Checks, in order:
+1. `setup`: `ensure_collection(call, collection)` creates the disposable collection with the production schema; no fixture slug exists yet
+2. `upsert`: all three fixtures upsert with inference (`wait=true`)
+3. `nested`: `live_scroll("m_anna", 10000)` returns exactly `smoke`; the decoy is excluded
+4. `tenant`: `live_scroll("m_ben")` returns only `m_ben` points
+5. `hybrid`: `hybrid_query("m_anna", "servers", now)` ranks `smoke` first and returns only `m_anna` points
+6. `soft_delete`: re-upserting `m_anna/smoke` with `deleted_at` 40 days ago removes it from `live_scroll` and adds it to `removed_scroll`
+7. `restore`: re-upserting it without `deleted_at` brings it back with no `deleted_at` in the payload
+8. `purge`: after a second soft delete, `purge("m_anna", "smoke", <now minus 30 days>)` deletes it; `m_anna/decoy` and `m_ben/smoke` survive
 
-echo "1. upsert with inference"
-q PUT "$C/points?wait=true" "{
-  \"shard_key\": \"m_anna\",
-  \"points\": [{
-    \"id\": \"$ID\",
-    \"vector\": {
-      \"summary\": {\"text\": \"1 invoices, 12300.00 EUR open, 1 overdue, last 2026-10-01\", \"model\": \"sentence-transformers/all-minilm-l6-v2\"},
-      \"digest\":  {\"text\": \"INV-4711 | 2026-10-01 | 12300.00 EUR | due 2026-10-15 | overdue | Hetzner servers\", \"model\": \"answerdotai/answerai-colbert-small-v1\"},
-      \"bm25\":    {\"text\": \"Invoice INV-4711 Hetzner servers total 12300.00\", \"model\": \"qdrant/bm25\"}
-    },
-    \"payload\": {
-      \"manager_id\": \"m_anna\", \"worker_id\": \"w_smoke\", \"customer_id\": \"smoke\", \"name\": \"Smoke GmbH\",
-      \"stage\": 2, \"pending_count\": 0, \"invoice_count\": 1,
-      \"total_amount\": 12300, \"open_amount\": 12300, \"overdue_count\": 1, \"overdue_amount\": 12300,
-      \"last_invoice_at\": \"$NOW\", \"updated_at\": \"$NOW\",
-      \"latest\": {\"invoice_no\": \"INV-4711\", \"amount\": 12300, \"stage\": 2},
-      \"summary_stage\": 1, \"summary_text\": \"1 invoices, 12300.00 EUR open, 1 overdue\", \"summary_generated_at\": \"$NOW\",
-      \"invoices\": [{\"id\": \"inv_smoke\", \"invoice_no\": \"INV-4711\", \"date\": \"2026-10-01\", \"due_date\": \"2026-10-15\",
-                     \"amount\": 12300, \"vendor\": \"Hetzner\", \"status\": \"overdue\", \"stage\": 2, \"error\": \"\", \"items\": \"Hetzner servers\"}]
-    }
-  }]
-}" | ok && echo "   ok"
+- [ ] **Step 1: Write the failing tests**
 
-echo "2. nested filter: overdue >= 10000"
-q POST "$C/points/scroll" '{
-  "shard_key": "m_anna", "limit": 10, "with_payload": ["customer_id"],
-  "order_by": {"key": "last_invoice_at", "direction": "desc"},
-  "filter": {"must": [
-    {"key": "manager_id", "match": {"value": "m_anna"}},
-    {"is_empty": {"key": "deleted_at"}},
-    {"nested": {"key": "invoices", "filter": {"must": [
-      {"key": "status", "match": {"value": "overdue"}},
-      {"key": "amount", "range": {"gte": 10000}}]}}}
-  ]}}' | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["points"]; assert any(p["payload"]["customer_id"]=="smoke" for p in r), r; print("   ok", len(r))'
+`test_bodies.py`:
+- `hybrid_query("m_anna", "servers", "2026-10-14T00:00:00Z")` equals the spec section 11 exhibit, apart from `with_payload`
+- every builder that takes a manager sets `shard_key` to it and filters `manager_id` on it
+- `live_scroll` without a threshold has no `nested` condition; with `0` it has one with `gte: 0`
+- `removed_scroll` puts `is_empty deleted_at` under `must_not`
+- `purge` filters `manager_id`, `customer_id`, and `deleted_at` `lt` the cutoff, and nothing broader
+- `upsert` uses the three exact model strings from `schema.MODELS`
 
-echo "3. section 11 query: three vectors, rrf, decay"
-F='{"must":[{"key":"manager_id","match":{"value":"m_anna"}},{"is_empty":{"key":"deleted_at"}}]}'
-q POST "$C/points/query" "{
-  \"shard_key\": \"m_anna\",
-  \"prefetch\": {
-    \"prefetch\": [
-      {\"query\": {\"nearest\": {\"text\": \"servers\", \"model\": \"qdrant/bm25\"}}, \"using\": \"bm25\", \"limit\": 20, \"filter\": $F},
-      {\"query\": {\"nearest\": {\"text\": \"servers\", \"model\": \"answerdotai/answerai-colbert-small-v1\"}}, \"using\": \"digest\", \"limit\": 20, \"filter\": $F},
-      {\"query\": {\"nearest\": {\"text\": \"servers\", \"model\": \"sentence-transformers/all-minilm-l6-v2\"}}, \"using\": \"summary\", \"limit\": 20, \"filter\": $F}
-    ],
-    \"query\": {\"rrf\": {}},
-    \"limit\": 20
-  },
-  \"query\": {\"formula\": {\"sum\": [\"\$score\", {\"mult\": [0.1,
-    {\"exp_decay\": {\"x\": {\"datetime_key\": \"last_invoice_at\"}, \"target\": {\"datetime\": \"$NOW\"}, \"scale\": 2592000, \"midpoint\": 0.5}}]}]}},
-  \"filter\": $F,
-  \"limit\": 5, \"with_payload\": [\"customer_id\", \"invoices\"]
-}" | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["points"]; assert r and r[0]["payload"]["customer_id"]=="smoke", r; print("   ok score", round(r[0]["score"],3))'
+`test_smoke.py`:
+- `smoke_collection_name` matches `^invoice_memory_smoke_\d{14}_\w+$`
+- `drop_smoke_collection` raises for `customers` and for an unprefixed name, without calling Qdrant
+- fixture point ids are distinct, fixed, valid UUIDs
+- the decoy has an overdue invoice and an invoice of at least 10000, never both on one invoice
 
-echo "4. soft delete filter hides it"
-q POST "$C/points/payload?wait=true" "{\"shard_key\": \"m_anna\", \"points\": [\"$ID\"], \"payload\": {\"deleted_at\": \"$NOW\"}}" | ok
-q POST "$C/points/scroll" "{\"shard_key\": \"m_anna\", \"limit\": 10, \"filter\": {\"must\": [{\"is_empty\": {\"key\": \"deleted_at\"}}, {\"key\": \"customer_id\", \"match\": {\"value\": \"smoke\"}}]}}" \
-  | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["points"]; assert r==[], r; print("   ok hidden")'
+- [ ] **Step 2: Run, verify they fail; implement `bodies.py` and `smoke.py`; run, verify they pass**
 
-echo "5. delete by datetime filter (purge shape)"
-q POST "$C/points/delete?wait=true" "{\"shard_key\": \"m_anna\", \"filter\": {\"must\": [{\"key\": \"deleted_at\", \"range\": {\"lt\": \"2099-01-01T00:00:00Z\"}}]}}" | ok && echo "   ok purged"
-echo "SMOKE PASSED"
-```
+Run: `python3 -m unittest discover -s scripts`
+Expected: failures first, then `OK`.
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 3: Run the smoke test against the cluster**
 
-Run: `chmod +x qdrant/smoke.sh && qdrant/smoke.sh`
+Run: `python3 scripts/smoke.py`
+Expected: eight `ok <check>` lines, then `SMOKE PASSED`; the smoke collection is gone afterwards (`GET /collections` lists no `invoice_memory_smoke_` name). Failure modes and what to change: `upsert` rejects an inference model, so check the cluster's Inference tab and change the string in `schema.MODELS`; `hybrid` rejects `nearest` inside `prefetch`, so move the inference object to `"query": {"text": ..., "model": ...}` per the error message and update `bodies.hybrid_query` and spec section 11; `nested` fails, so check that the `invoices[].status` index exists.
 
-Before the first point write, actually create the disposable collection using the shared setup helper, passing its generated collection name, and verify that no production customer exists in it. Parameterize Task 1's setup function instead of duplicating schema. The inline comments above are implementation requirements, not executable collection creation. Use datetime ranges as verified by the deployed schema, and scope smoke purge to manager_id and the reserved smoke ID. Add a two-invoice negative nested-filter fixture: one overdue small invoice plus one paid large invoice must not match overdue >= 10000. Add read isolation for same slug under the other manager and verify upsert replacement removes deleted_at on restore.
-Expected: five `ok` lines then `SMOKE PASSED`. Failure modes and what to change: step 1 rejects an inference model → check the cluster's Inference tab, swap the model string everywhere; step 3 rejects `nearest` inside `prefetch` → move the inference object to `"query": {"text": ..., "model": ...}` per the error message and update the spec's section 11; step 2 fails on `nested` → check that the `invoices[].status` index exists (`setup.sh` output).
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add qdrant/smoke.sh
-git commit -m "test(qdrant): smoke test for inference upsert, nested filter, hybrid query, soft delete, purge
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add scripts/bodies.py scripts/smoke.py scripts/test_bodies.py scripts/test_smoke.py
+git commit -m "test(scripts): reference request bodies and a disposable-collection smoke test"
 ```
 
 ---
@@ -275,62 +224,32 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 3: OpenRouter PDF Gate
 
 **Files:**
-- Create: `qdrant/openrouter_check.sh`
-- Test: the script is the test
+- Create: `scripts/openrouter_check.py`, `scripts/test_openrouter_check.py`
+- Test: unit tests, then one live call with a synthetic sample
 
 **Interfaces:**
-- Produces: the exact OpenRouter request body Task 7 pastes into the vision node, and the confirmed `OPENROUTER_MODEL` value for `.env` and `Config`.
+- `REQUIRED_FIELDS`: `invoice_no`, `date`, `due_date`, `amount`, `vendor`, `customer_name`, `status`, `line_items_summary`
+- `extraction_body(pdf: bytes, model: str, engine: str) -> dict`: the exact body Task 7's vision node sends (temperature 0, `max_tokens` 400, `response_format` JSON object, the `file-parser` plugin with the engine, the system prompt, and the PDF as a base64 data URL)
+- `parse_reply(response: dict) -> dict`: returns the extracted fields; raises `ExtractionError` when there are no choices, the content is not bare JSON (a fenced code block fails, as it would in n8n's `JSON.parse`), or fields are missing (naming all of them)
+- `require_synthetic(path: Path, samples_dir: Path) -> Path`: raises `ValueError` unless the resolved path is a PDF inside `samples/`, so no real invoice is ever sent
+- `main(argv)`: `python3 scripts/openrouter_check.py samples/acme-001.pdf` sends with the `Authorization: Bearer` header and a 35 s timeout, prints the fields as JSON and `latency_ms` measured with `time.monotonic`
 
-- [ ] **Step 1: Write `qdrant/openrouter_check.sh`**
+- [ ] **Step 1: Write the failing tests** for each interface line above: the body's model, temperature, response format, plugin engine, data URL decoding back to the input bytes, and all eight field names in the system prompt; `parse_reply` on a good reply, no choices, fenced JSON, and two missing fields; `require_synthetic` on a sample, a path outside `samples/`, and a `..` escape.
 
-```bash
-#!/usr/bin/env bash
-# Sends one PDF to the pinned model with native PDF input and JSON mode. Needs a PDF path.
-set -euo pipefail
-cd "$(dirname "$0")"; set -a; [ -f ../.env ] && . ../.env; set +a
-: "${OPENROUTER_API_KEY:?}"; : "${OPENROUTER_MODEL:?}"
-PDF=${1:?pdf path}
-B64=$(base64 < "$PDF" | tr -d '\n')
-python3 - "$B64" "$OPENROUTER_MODEL" <<'PY' > /tmp/or_body.json
-import json,sys
-b64,model=sys.argv[1],sys.argv[2]
-print(json.dumps({
- "model": model, "temperature": 0, "max_tokens": 400,
- "response_format": {"type": "json_object"},
- "plugins": [{"id": "file-parser", "pdf": {"engine": "native"}}],
- "messages": [
-  {"role": "system", "content": "You read one invoice PDF and return JSON only with keys: invoice_no, date (YYYY-MM-DD), due_date (YYYY-MM-DD), amount (number in EUR, no thousands separators), vendor, customer_name, status (one of: open, paid, overdue), line_items_summary (max 12 words)."},
-  {"role": "user", "content": [
-    {"type": "text", "text": "Extract the fields."},
-    {"type": "file", "file": {"filename": "invoice.pdf", "file_data": "data:application/pdf;base64," + b64}}]}
- ]}))
-PY
-START=$(python3 -c 'import time; print(time.monotonic_ns())')
-curl --fail-with-body -sS --max-time 35 https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'content-type: application/json' -d @/tmp/or_body.json > /tmp/or_resp.json
-END=$(python3 -c 'import time; print(time.monotonic_ns())')
-python3 - <<'PY'
-import json
-r=json.load(open('/tmp/or_resp.json'))
-assert 'choices' in r, r
-c=json.loads(r['choices'][0]['message']['content'])
-for k in ['invoice_no','date','due_date','amount','vendor','customer_name','status','line_items_summary']: assert k in c, (k, c)
-print("fields:", c)
-PY
-echo "latency_ms: $(( (END-START)/1000000 ))"
-```
+- [ ] **Step 2: Run, verify they fail; implement; run, verify they pass**
 
-- [ ] **Step 2: Run with synthetic fixtures only** (after Task 5 produces the samples; do not send real local invoices)
+Run: `python3 -m unittest discover -s scripts`
 
-Run: `chmod +x qdrant/openrouter_check.sh && qdrant/openrouter_check.sh samples/acme-001.pdf`
-Expected: `fields: {...}` with all eight requested keys and `latency_ms` under 30000. If the model rejects `file` input, open `https://openrouter.ai/models`, pick the cheapest mid-tier model that lists PDF input and `response_format`, set it in `.env`, rerun. If none works, set `PDF_ENGINE=pdf-text` in `.env` (text extraction instead of vision) and strike the word "vision" from `booth/script.md` in Task 13.
+- [ ] **Step 3: Run with a synthetic fixture** (after Task 5 produces the samples)
 
-- [ ] **Step 3: Commit**
+Run: `python3 scripts/openrouter_check.py samples/acme-001.pdf`
+Expected: the eight fields with `amount` 12300 and `latency_ms` under 30000. If the model rejects `file` input, open `https://openrouter.ai/models`, pick the cheapest mid-tier model that lists PDF input and `response_format`, set it in `.env`, rerun. If none works, set `PDF_ENGINE=pdf-text` in `.env` (text extraction instead of vision) and strike the word "vision" from `booth/script.md` in Task 13.
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add qdrant/openrouter_check.sh
-git commit -m "test(openrouter): PDF input and JSON mode gate for the pinned model
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add scripts/openrouter_check.py scripts/test_openrouter_check.py
+git commit -m "test(openrouter): PDF input and JSON mode gate for the pinned model"
 ```
 
 ---
@@ -630,9 +549,7 @@ Expected: all tests pass, `# fail 0`.
 
 ```bash
 git add workflows/code
-git commit -m "feat(code): pure functions for n8n Code nodes with node tests
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(code): pure functions for n8n Code nodes with node tests"
 ```
 
 ---
@@ -763,15 +680,13 @@ shasum -a 256 beta-003.pdf beta-004.pdf
 ```
 
 Run: `chmod +x samples/print.sh && samples/print.sh`
-Expected: `14` then two identical SHA-256 lines. Then: `qdrant/openrouter_check.sh samples/acme-001.pdf` prints `amount: 12300`.
+Expected: `14` then two identical SHA-256 lines. Then: `python3 scripts/openrouter_check.py samples/acme-001.pdf` prints fields with `amount` 12300.
 
 - [ ] **Step 6: Commit** (PDFs are committed on purpose: the Form downloads them from the repo's raw URL)
 
 ```bash
 git add samples/gen.py samples/test_gen.py samples/print.sh samples/manifest.json samples/*.pdf
-git commit -m "feat(samples): 14 synthetic invoice PDFs, two in German number format, one byte-identical duplicate
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(samples): 14 synthetic invoice PDFs, two in German number format, one byte-identical duplicate"
 ```
 
 ---
@@ -781,7 +696,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **Files:**
 - Create in n8n Cloud: Data Tables `invoices`, `customers`; workflow `03 Rebuild point`
 - Export: `workflows/03-rebuild-point.json`
-- Test: `qdrant/check_point.sh` (created here) against a hand-seeded customer
+- Create: `scripts/check_point.py`, `scripts/test_check_point.py`
+- Test: unit tests, then `scripts/check_point.py` against a hand-seeded customer
 
 **Interfaces:**
 - Consumes: `computeView`, `uuidFromHex` from Task 4 (pasted).
@@ -795,21 +711,18 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 Seed two rows by hand in `customers`: (`acme`, `w_tom`, `m_anna`, `Acme GmbH`) and (`acme`, `w_jules`, `m_ben`, `Acme GmbH`). Seed one row in `invoices` for each: invoice_id `inv_seed_a` / `inv_seed_b`, stage `1`, `regex_fields` = `{"invoice_no":"INV-4711","amount":12.3,"status":"open"}`, `text` = `seed`, `received_at` = now.
 
-- [ ] **Step 2: Write `qdrant/check_point.sh`** (the test for this and later tasks)
+- [ ] **Step 2: Write `scripts/check_point.py`** test-first (the point check for this and later tasks)
 
-```bash
-#!/usr/bin/env bash
-# usage: check_point.sh <manager_id> <customer_id> [jq-ish python expr on payload, default prints it]
-set -euo pipefail
-cd "$(dirname "$0")"; set -a; [ -f ../.env ] && . ../.env; set +a
-. ./lib.sh
-M=$1; CU=$2; EXPR=${3:-'print(json.dumps(p, indent=1))'}
-q POST /collections/customers/points/scroll "{\"shard_key\": \"$M\", \"limit\": 1, \"with_payload\": true, \"filter\": {\"must\": [{\"key\": \"customer_id\", \"match\": {\"value\": \"$CU\"}}]}}" \
- | python3 -c "import sys,json; pts=json.load(sys.stdin)['result']['points']; assert pts, 'no point'; p=pts[0]['payload']; $EXPR"
-```
+Interface:
+- `get_path(payload: dict, path: str) -> Any`: dot path where integer segments index lists (`latest.amount`, `invoices.0.error`); a missing segment raises `KeyError` naming the path
+- `parse_expectation(text: str) -> tuple[str, Any]`: splits on the first `=`; the value parses as JSON, falling back to the raw string (`stage=1` gives `1`, `worker_id=w_tom` gives `"w_tom"`)
+- `failures(payload: dict, expects: Mapping[str, Any], present: Iterable[str], absent: Iterable[str]) -> list[str]`: one line per unmet expectation, `[]` when all hold
+- `main(argv)`: `python3 scripts/check_point.py MANAGER CUSTOMER [--show a,b] [--expect path=value]... [--present path]... [--absent path]...` reads the point with `bodies.customer_scroll`. With no flags it prints the payload as JSON. `--show` prints `path=value` pairs on one line. Exit 0 when every expectation holds (prints `ok`), 1 with each failure printed, 2 with `no point for MANAGER/CUSTOMER`.
 
-Run: `chmod +x qdrant/check_point.sh && qdrant/check_point.sh m_anna acme`
-Expected: `AssertionError: no point` (the workflow doesn't exist yet).
+Tests: `get_path` on nested dicts, list indexes, and a missing path; `parse_expectation` on integer, float, string, and a value containing `=`; `failures` on a matching payload, a wrong value, and `present`/`absent` both ways.
+
+Run: `python3 -m unittest discover -s scripts`, then `python3 scripts/check_point.py m_anna acme`
+Expected: `OK`, then `no point for m_anna/acme` with exit 2 (the workflow doesn't exist yet).
 
 - [ ] **Step 3: Build workflow `03 Rebuild point`** (nodes in order; names are the sentences)
 
@@ -823,7 +736,7 @@ Expected: `AssertionError: no point` (the workflow doesn't exist yet).
 | 6 | Compute the view | Code, Run once for all items. Body below |
 | 7 | Upsert the point with inference | HTTP Request. PUT `={{ $('Config').item.json.QDRANT_URL }}/collections/{{ $('Config').item.json.COLLECTION }}/points?wait=true`. Auth: Header Auth, `Qdrant api-key`. Body: JSON, Using fields below: `={{ $json.body }}` as raw JSON (Specify Body: Using JSON, JSON: `={{ JSON.stringify($json.body) }}`) |
 
-Code node 6, paste the `uuidFromHex` and `computeView` function bodies from `workflows/code/ids.js` and `view.js` verbatim (without the `module.exports` lines), then:
+Code node 6 builds the same JSON as `bodies.upsert` (compare with `python3 scripts/bodies.py`). Paste the `uuidFromHex` and `computeView` function bodies from `workflows/code/ids.js` and `view.js` verbatim (without the `module.exports` lines), then:
 
 ```js
 const cfg = $('Config').first().json;
@@ -849,9 +762,9 @@ Sticky note (one): "Source of truth is the two Data Tables. This workflow is the
 
 In the workflow editor, run with test input `{"customer_id": "acme", "manager_id": "m_anna"}`, then again with `m_ben`.
 
-Run: `qdrant/check_point.sh m_anna acme 'assert p["stage"]==1 and p["latest"]["amount"]==12.3 and p["worker_id"]=="w_tom", p; print("m_anna ok")'`
-Run: `qdrant/check_point.sh m_ben acme 'assert p["worker_id"]=="w_jules", p; print("m_ben ok")'`
-Expected: both print ok. Two points exist for slug `acme` (Review Focus 3).
+Run: `python3 scripts/check_point.py m_anna acme --expect stage=1 --expect latest.amount=12.3 --expect worker_id=w_tom`
+Run: `python3 scripts/check_point.py m_ben acme --expect worker_id=w_jules`
+Expected: both print `ok`. Two points exist for slug `acme` (Review Focus 3).
 
 - [ ] **Step 5: Export and scrub**
 
@@ -863,10 +776,8 @@ Expected: `1`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add workflows/03-rebuild-point.json qdrant/check_point.sh
-git commit -m "feat(n8n): 03 Rebuild point sub-workflow; point check script
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add workflows/03-rebuild-point.json scripts/check_point.py scripts/test_check_point.py
+git commit -m "feat(n8n): 03 Rebuild point sub-workflow; point check script"
 ```
 
 ---
@@ -876,7 +787,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **Files:**
 - Create in n8n Cloud: `01 Ingest`, `02 Process`, `02b Write the narrative`
 - Export: `workflows/01-ingest.json`, `workflows/02-process.json`, `workflows/02b-narrative.json`
-- Test: Form submission, then `qdrant/check_point.sh` polled
+- Test: Form submission, then `scripts/check_point.py` polled
 
 **Interfaces:**
 - Consumes: `03 Rebuild point` (inputs `customer_id`, `manager_id`); `resolveUpload`, `coarseRead`, `validateFields` from Task 4; OpenRouter body from Task 3; `samples/manifest.json` file names.
@@ -979,18 +890,18 @@ Before downloading, validate sample and worker and resolve the tenant. Scope dup
 Activate `01 Ingest`. Open the Form URL. Pick `acme-001.pdf`, worker `w_tom`, submit. Note the time.
 
 Run every 5 s for up to 60 s:
-`qdrant/check_point.sh m_anna acme 'print(p["stage"], p["pending_count"], p["latest"], p["summary_stage"])'`
-Expected sequence: `0 1 {... 'stage': 0} 1` within 3 s → `1 1 {'amount': 12.3, 'stage': 1} 1` within 6 s → `2 0 {'amount': 12300.0, 'stage': 2} 1` within 40 s → `2 0 ... 3` a few seconds later. The amount flips from 12.3 to 12300 (the booth moment).
+`python3 scripts/check_point.py m_anna acme --show stage,pending_count,latest.amount,summary_stage`
+Expected sequence: `stage=0 pending_count=1 latest.amount=null summary_stage=1` within 3 s → `stage=1 pending_count=1 latest.amount=12.3 summary_stage=1` within 6 s → `stage=2 pending_count=0 latest.amount=12300 summary_stage=1` within 40 s → `summary_stage=3` a few seconds later. The amount flips from 12.3 to 12300 (the booth moment).
 
 - [ ] **Step 5: Test the duplicate path**
 
 Submit `beta-003.pdf` with `w_tom`, wait 40 s, then submit `beta-004.pdf` with `w_tom`.
-Expected: the second submission ends on the "Duplicate" page naming `beta-003.pdf`; `qdrant/check_point.sh m_anna beta 'print(p["invoice_count"])'` prints `1`.
+Expected: the second submission ends on the "Duplicate" page naming `beta-003.pdf`; `python3 scripts/check_point.py m_anna beta --expect invoice_count=1` prints `ok`.
 
 - [ ] **Step 6: Test the error path**
 
 Temporarily set `Config.OPENROUTER_MODEL` in `02 Process` to `nonexistent/model`, submit `gamma-001.pdf` with `w_lena`.
-Expected within 20 s: `qdrant/check_point.sh m_anna gamma 'print(p["stage"], p["invoices"][0]["error"][:40])'` prints `1 ...` with a non-empty error; the execution list shows `02 Process` finished, not crashed. Restore the model. Delete the gamma rows from both Data Tables and rerun `gamma-001.pdf` so the corpus is clean.
+Expected within 20 s: `python3 scripts/check_point.py m_anna gamma --show stage,invoices.0.error` prints `stage=1` and a non-empty error; the execution list shows `02 Process` finished, not crashed. Restore the model. Delete the gamma rows from both Data Tables and rerun `gamma-001.pdf` so the corpus is clean.
 
 - [ ] **Step 7: Export, scrub, commit**
 
@@ -998,9 +909,7 @@ Export the three workflows, scrub as in Task 6 (no credential ids, `Config` URLs
 
 ```bash
 git add workflows/01-ingest.json workflows/02-process.json workflows/02b-narrative.json
-git commit -m "feat(n8n): ingest, staged processing, and narrative workflows
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(n8n): ingest, staged processing, and narrative workflows"
 ```
 
 ---
@@ -1010,10 +919,11 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **Files:**
 - Create in n8n Cloud: `04 Dashboard reads`
 - Export: `workflows/04-dashboard-reads.json`
-- Test: curl against the two webhooks
+- Create: `scripts/reads_check.py`, `scripts/test_reads_check.py`
+- Test: unit tests, then `scripts/reads_check.py` against the two webhooks
 
 **Interfaces:**
-- Consumes: `shapeCards`, `splitRemoved`, `pickMatchedLine` from Task 4; request bodies from Task 2.
+- Consumes: `shapeCards`, `splitRemoved`, `pickMatchedLine` from Task 4; `bodies.live_scroll`, `bodies.removed_scroll`, and `bodies.hybrid_query` from Task 2.
 - Produces: `GET <N8N_BASE_URL>/webhook/customers?manager=m_anna[&overdue_gte=10000]` → `{cards: Card[], removed: Removed[], latency_ms}`; `GET <N8N_BASE_URL>/webhook/search?manager=m_anna&q=servers` → `{results: [{customer_id, score, matched_line}], latency_ms}`. Task 9 depends on exactly these shapes.
 
 - [ ] **Step 1: Build the list path** (6 nodes)
@@ -1037,6 +947,8 @@ Node 3 body:
 })() }}
 ```
 
+Nodes 3 and 4 must produce the same JSON as `bodies.live_scroll` and `bodies.removed_scroll` (compare with `python3 scripts/bodies.py`).
+
 Node 4 body: same, but `must` is `[ { key: 'manager_id', match: { value: qs.manager } } ]` and `must_not: [ { is_empty: { key: 'deleted_at' } } ]` and no nested condition.
 
 Node 5 body (after the pasted functions):
@@ -1056,7 +968,7 @@ return [{ json: { cards, removed, latency_ms: Date.now() - $('Config').first().j
 |---|---|---|
 | 7 | Search three vectors in one request | Webhook GET, path `search`, Respond: Using Respond to Webhook node |
 | 8 | Config (search) | Edit Fields, same values as node 2 |
-| 9 | Run the hybrid query | HTTP Request POST `.../points/query`, Header Auth. Body: the section 11 body from `qdrant/smoke.sh` step 3 with `servers` replaced by `qs.q`, `m_anna` by `qs.manager`, `$NOW` by `new Date().toISOString()`, `with_payload: ['customer_id','invoices']`, built the same way as node 3 with an IIFE |
+| 9 | Run the hybrid query | HTTP Request POST `.../points/query`, Header Auth. Body: `bodies.hybrid_query` rebuilt as an IIFE like node 3, with `qs.manager`, `qs.q`, and `new Date().toISOString()` as its arguments |
 | 10 | Pick the matched line | Code, paste `pickMatchedLine`; `const r = $json.result.points; const q = $('Search three vectors in one request').first().json.query.q; return [{json:{results: r.map(p => ({customer_id: p.payload.customer_id, score: +p.score.toFixed(4), matched_line: pickMatchedLine(q, p.payload.invoices)})).filter(p => p.matched_line !== null), latency_ms: Date.now() - $('Config (search)').first().json.qdrant_started_at}}];` |
 | 11 | Respond with matches | Respond to Webhook, JSON, CORS header as node 6 |
 
@@ -1064,28 +976,26 @@ Sticky (one, over node 9): "Eight primitives, one request. Tenant filter, is_emp
 
 - [ ] **Step 3: Test**
 
-Activate. With the corpus from Task 7 (at least acme, beta under m_anna):
+Write `scripts/reads_check.py` test-first. Its pure judges take decoded responses and return failure lines (`[]` on success), and `main` fetches through `transport.send` (catching `HttpError` where a 400 is the expected answer):
 
-```bash
-B=$N8N_BASE_URL/webhook
-curl -s "$B/customers?manager=m_anna" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert {c["customer_id"] for c in d["cards"]} >= {"acme","beta"}, d; assert d["latency_ms"] < 300, d["latency_ms"]; print("list ok", d["latency_ms"])'
-curl -s "$B/customers?manager=m_anna&overdue_gte=10000" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert {c["customer_id"] for c in d["cards"]} == {"acme","beta"}, d; print("filter ok")'
-curl -s "$B/customers?manager=m_ben" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert not any(c["customer_id"]=="acme" and c["worker"]=="Tom" for c in d["cards"]); print("tenant ok")'
-curl -s "$B/search?manager=m_anna&q=servers" | python3 -c 'import sys,json; d=json.load(sys.stdin); r=d["results"]; assert r and r[0]["customer_id"]=="acme" and "servers" in (r[0]["matched_line"] or ""), d; assert d["latency_ms"] < 500; print("search ok", d["latency_ms"])'
-curl -s "$B/search?manager=m_anna&q=zebra+unicorn" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["results"] == [], d; print("no-match ok")'
-```
+- `list_failures(resp, must_include: set[str], max_latency_ms: int)`: envelope has `cards`, `removed`, `latency_ms`; card ids include the expected set; latency within budget
+- `filter_failures(resp, expected: set[str])`: card ids equal the expected set exactly
+- `isolation_failures(results, tenant_ids: set[str])`: every search hit is one of that manager's live cards
+- `search_failures(resp, first: str, term: str, max_latency_ms: int)`: first hit is `first`, its matched line contains the term, latency within budget
+- `no_match_failures(resp)`: `results == []`
 
-Expected: five `ok` lines. Timing uses wall milliseconds from the path's Config timestamp through Qdrant response shaping, including Cloud transport and inference.
+Tests feed each judge a passing response and one failing response per rule. Then activate the workflow and, with the corpus from Task 7 (at least acme and beta under m_anna):
 
-Config captures `qdrant_started_at = Date.now()` immediately before each Qdrant path, and shaping computes wall elapsed milliseconds. Qdrant `time` is server processing time and must not be presented as Cloud call latency. Add a validation Code node to each read path (13 actual nodes total), before its HTTP request; Config includes `MANAGERS`. Preserve two independent Config references. Search maps candidates to matched lines and returns only rows with a non-null matched line, preserving hybrid rank order. This is an explicit lexical admission rule for the booth exhibit, not a general semantic relevance threshold; a positive RRF score cannot establish relevance. Filter the mapped `results` before response and compute search latency from `Config (search).qdrant_started_at`. Add tests for unknown manager, malformed/negative thresholds, blank search, unrelated query returning `[]`, and manager isolation. Limit 50 is a booth-corpus bound; fail the corpus check if it is exceeded or implement proper ordered-scroll pagination before expanding scope.
+Run: `python3 scripts/reads_check.py`
+Expected: `ok` for each of `list` (acme and beta, under 300 ms), `filter` (`overdue_gte=10000` gives exactly acme and beta), `tenant` (m_ben has no card with worker Tom), `search` (`servers` ranks acme first, under 500 ms), `no-match` (`zebra unicorn` gives `[]`), `isolation` (m_ben's `servers` hits are all m_ben cards), and `validation` (unknown manager, `overdue_gte=-1`, `overdue_gte=abc`, and blank `q` each return 400), then `READS OK`. Timing uses wall milliseconds from the path's Config timestamp through Qdrant response shaping, including Cloud transport and inference.
+
+Config captures `qdrant_started_at = Date.now()` immediately before each Qdrant path, and shaping computes wall elapsed milliseconds. Qdrant `time` is server processing time and must not be presented as Cloud call latency. Add a validation Code node to each read path (13 actual nodes total), before its HTTP request; Config includes `MANAGERS`. Preserve two independent Config references. Search maps candidates to matched lines and returns only rows with a non-null matched line, preserving hybrid rank order. This is an explicit lexical admission rule for the booth exhibit, not a general semantic relevance threshold; a positive RRF score cannot establish relevance. Filter the mapped `results` before response and compute search latency from `Config (search).qdrant_started_at`. Limit 50 is a booth-corpus bound; fail the corpus check if it is exceeded or implement proper ordered-scroll pagination before expanding scope.
 
 - [ ] **Step 4: Export, scrub, commit**
 
 ```bash
-git add workflows/04-dashboard-reads.json
-git commit -m "feat(n8n): dashboard read webhooks: list with nested filter, hybrid search
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add workflows/04-dashboard-reads.json scripts/reads_check.py scripts/test_reads_check.py
+git commit -m "feat(n8n): dashboard read webhooks: list with nested filter, hybrid search"
 ```
 
 ---
@@ -1153,7 +1063,8 @@ Run the dashboard tests and manual checks, then commit the dashboard files using
 **Files:**
 - Create in n8n Cloud: `05 Dashboard writes`
 - Export: `workflows/05-dashboard-writes.json`
-- Test: curl plus `check_point.sh`
+- Create: `scripts/writes_check.py`, `scripts/test_writes_check.py`
+- Test: unit tests, then `scripts/writes_check.py` against the webhooks and the point
 
 **Interfaces:**
 - Consumes: `03 Rebuild point`.
@@ -1177,26 +1088,24 @@ Run the dashboard tests and manual checks, then commit the dashboard files using
 
 - [ ] **Step 2: Test**
 
-```bash
-B=$N8N_BASE_URL/webhook
-curl -s -X POST "$B/customers/remove" -H 'content-type: application/json' -d '{"manager":"m_anna","customer":"acme"}'
-qdrant/check_point.sh m_anna acme 'assert "deleted_at" in p, p; print("point keeps deleted_at")'
-curl -s "$B/customers?manager=m_anna" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert "acme" not in {c["customer_id"] for c in d["cards"]}; assert d["removed"][0]["customer_id"]=="acme" and d["removed"][0]["purge_at"]; print("hidden, in tray")'
-curl -s -X POST "$B/customers/restore" -H 'content-type: application/json' -d '{"manager":"m_anna","customer":"acme"}'
-qdrant/check_point.sh m_anna acme 'assert "deleted_at" not in p, p; print("restored")'
-```
+Write `scripts/writes_check.py` test-first. Pure judges (`write_failures(resp)` for `{ok: true, purge_at}`, `tray_failures(list_resp, customer)` for hidden-from-cards and present-in-tray with `purge_at`, and the `check_point.failures` already built) are unit-tested; `main` drives the sequence and restores `m_anna/acme` in `finally`, so a failed run leaves the corpus as it found it:
 
-Expected: four confirmations. In the browser (Task 9), Remove on acme moves it to the tray within 2 s, Restore brings it back.
+1. remove `m_anna/acme`: response ok with an ISO `purge_at`; the point has `deleted_at`; the list hides acme and the tray shows it
+2. remove it again: `deleted_at` is unchanged (the first tombstone holds)
+3. if `m_ben/acme` exists (the Task 6 seed), it is still live (same slug, other tenant)
+4. restore: the point has no `deleted_at` and acme is back in the cards
+5. unknown manager returns 400; unknown customer returns 404
+
+Run: `python3 scripts/writes_check.py`
+Expected: `ok` per step, then `WRITES OK`. In the browser (Task 9), Remove on acme moves it to the tray within 2 s, Restore brings it back.
 
 Add Config and a validation/customer lookup before the update (under 15 actual nodes). Map an explicit action from each webhook, validate manager/customer, and return 400/404 for invalid/missing inputs. Use ISO deleted_at for remove, null for restore, and full ISO purge_at; do not strip then append Z. Repeated remove preserves the first tombstone. Rebuild inputs reference validated tenant/customer explicitly. Return a failure response if rebuild fails, preserving table state for retry. Test same-slug cross-manager isolation and browser JSON POST preflight; add OPTIONS response only if the live n8n gate proves necessary.
 
 - [ ] **Step 3: Export, scrub, commit**
 
 ```bash
-git add workflows/05-dashboard-writes.json
-git commit -m "feat(n8n): remove and restore webhooks with soft delete
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add workflows/05-dashboard-writes.json scripts/writes_check.py scripts/test_writes_check.py
+git commit -m "feat(n8n): remove and restore webhooks with soft delete"
 ```
 
 ---
@@ -1220,7 +1129,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 | 3 | Load removed customer rows | Data Table customers Get all rows with non-null deleted_at; Always Output Data on |
 | 4 | Capture eligible identities | Code: calculate cutoff once; filter valid deleted_at strictly earlier than cutoff, manager in Config MANAGERS; emit each `{manager_id,customer_id,deleted_at,cutoff}`; empty input returns `[]` |
 | 5 | Purge one customer at a time | Loop Over Items, batch size 1; all deletes reference the current loop item, never `.first()` over all candidates |
-| 6 | Delete this expired point | HTTP POST `points/delete?wait=true`, shard_key from loop item, filter must manager_id + customer_id + datetime deleted_at range `{lt: cutoff}`; assert HTTP success and Qdrant status ok |
+| 6 | Delete this expired point | HTTP POST `points/delete?wait=true`, body equal to `bodies.purge` for the loop item (shard_key, filter must manager_id + customer_id + datetime deleted_at range `{lt: cutoff}`); assert HTTP success and Qdrant status ok |
 | 7 | Delete this customer's invoice rows | Data Table invoices Delete where manager_id AND customer_id match captured loop identity; Always Output Data on |
 | 8 | Delete this expired customer row | Data Table customers Delete where manager_id AND customer_id AND deleted_at equal captured values; Always Output Data on; loop back to 5 |
 
@@ -1232,15 +1141,13 @@ The snapshot precedes every delete, so no deletion output is used to recover ide
 
 Create a throwaway customer by hand in the `customers` table: `zombie`, `w_tom`, `m_anna`, `deleted_at` = 40 days ago; run `03 Rebuild point` for it once so a point exists (add one invoice row too). Run `06 Purge` manually.
 
-Run: `qdrant/check_point.sh m_anna zombie` → Expected: `AssertionError: no point`. The two tables no longer contain `zombie`. `qdrant/check_point.sh m_anna acme 'print("acme survives")'` → prints.
+Run: `python3 scripts/check_point.py m_anna zombie` → Expected: `no point for m_anna/zombie`, exit 2. The two tables no longer contain `zombie`. `python3 scripts/check_point.py m_anna acme --show customer_id` → prints `customer_id=acme`.
 
 - [ ] **Step 3: Export, scrub, commit**
 
 ```bash
 git add workflows/06-purge.json
-git commit -m "feat(n8n): nightly purge of soft-deleted customers after 30 days
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(n8n): nightly purge of soft-deleted customers after 30 days"
 ```
 
 ---
@@ -1248,65 +1155,34 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 12: Full Corpus Ingest and Rehearsal Checks
 
 **Files:**
-- Create: `qdrant/corpus_check.sh`
-- Test: the script
+- Create: `scripts/corpus_check.py`, `scripts/test_corpus_check.py`
+- Test: unit tests, then the script against the live endpoints
 
 - [ ] **Step 1: Reset and ingest**
 
-Delete all rows in both Data Tables (UI). Recreate the collection: `qdrant/setup.sh` after `q DELETE /collections/customers` (run `. qdrant/lib.sh` first with `.env` sourced). Submit the 13 unique samples through the Form, 40 s apart, with the worker from `samples/manifest.json`. Skip `beta-004.pdf` for the corpus (it's the live duplicate moment).
+Delete all rows in both Data Tables (UI). Recreate the collection: delete `customers` in the Qdrant Cloud console, then run `python3 scripts/setup_collection.py`. Submit the 13 unique samples through the Form, 40 s apart, with the worker from `samples/manifest.json`. Skip `beta-004.pdf` for the corpus (it's the live duplicate moment).
 
-- [ ] **Step 2: Write `qdrant/corpus_check.sh`**
+- [ ] **Step 2: Write `scripts/corpus_check.py`** test-first
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"; set -a; [ -f ../.env ] && . ../.env; set +a
-B=$N8N_BASE_URL/webhook
-python3 - "$B" <<'PY'
-import json, sys, urllib.request
-B = sys.argv[1]
-get = lambda p: json.load(urllib.request.urlopen(f"{B}/{p}"))
-m = json.load(open('../samples/manifest.json'))
-exp = {}
-for r in m:
-    if r.get('duplicate_of'): continue
-    exp.setdefault(r['customer'], []).append(r)
-anna = get('customers?manager=m_anna'); ben = get('customers?manager=m_ben')
-cards = {c['customer_id']: c for c in anna['cards'] + ben['cards']}
-assert set(cards) == set(exp), (set(cards), set(exp))
-for cid, rows in exp.items():
-    c = cards[cid]
-    assert c['invoice_count'] == len(rows), (cid, c['invoice_count'], len(rows))
-    assert c['stage'] == 2 and c['rung'] == 3 and c['pending_count'] == 0, (cid, c['stage'], c['rung'], c['pending_count'])
-    exp_open = round(sum(r['expected_amount'] for r in rows if r['status'] != 'paid'), 2)
-    assert abs(c['open_amount'] - exp_open) < 0.01, (cid, c['open_amount'], exp_open)
-assert {c['customer_id'] for c in anna['cards']} == {'acme', 'beta', 'gamma'}
-assert {c['customer_id'] for c in ben['cards']} == {'delta', 'eps', 'zeta'}
-f = get('customers?manager=m_anna&overdue_gte=10000')
-assert {c['customer_id'] for c in f['cards']} == {'acme', 'beta'}, f
-for term, want in [('servers', {'acme'}), ('consulting', {'beta'}), ('licenses', {'acme', 'gamma'})]:
-    r = get(f'search?manager=m_anna&q={term}')
-    got = {x['customer_id'] for x in r['results'] if x['matched_line']}
-    assert got == want, (term, got, want)
-    assert r['latency_ms'] < 500, (term, r['latency_ms'])
-print('CORPUS OK')
-PY
-```
+Interface:
+- `expected_corpus(manifest: list[dict]) -> dict[str, list[dict]]`: manifest rows grouped by customer, duplicates (`duplicate_of`) dropped
+- `corpus_failures(expected, lists: Mapping[str, dict], overdue: dict, searches: Mapping[str, dict]) -> list[str]`: every failure, not just the first. `lists` maps manager to its `/customers` response, `overdue` is m_anna's `overdue_gte=10000` response, and `searches` maps each term to its `/search` response. Rules: the customer set equals the manifest's; per customer `invoice_count` matches, `stage == 2`, `rung == 3`, `pending_count == 0`, and `open_amount` is within 0.01 of the manifest's non-paid sum; m_anna holds acme, beta, gamma and m_ben holds delta, eps, zeta; the filter returns exactly acme and beta; `servers` hits {acme}, `consulting` hits {beta}, `licenses` hits {acme, gamma}, each under 500 ms.
+- `main(argv)`: reads `samples/manifest.json`, fetches the endpoints with `transport.send`, prints each failure, and ends with `CORPUS OK` or exit 1.
+
+Tests: a response set built from a small manifest passes; a wrong `open_amount`, a missing customer, a customer under the wrong manager, a wrong search set, and slow search latency each produce exactly one failure line naming the customer or term.
 
 - [ ] **Step 3: Run**
 
-Run: `chmod +x qdrant/corpus_check.sh && qdrant/corpus_check.sh`
-Expected: `CORPUS OK`. A failing `open_amount` means the vision model misread one invoice: open that invoice's row, read `llm_fields`, and fix extraction and retry against unchanged fixture amounts; never change the PDF ground truth to match a wrong model result. A failing search term means line items need a more distinctive word; edit `gen.py`, regenerate, re-ingest that customer.
+Run: `python3 -m unittest discover -s scripts && python3 scripts/corpus_check.py`
+Expected: `OK`, then `CORPUS OK`. A failing `open_amount` means the vision model misread one invoice: open that invoice's row, read `llm_fields`, and fix extraction and retry against unchanged fixture amounts; never change the PDF ground truth to match a wrong model result. A failing search term means line items need a more distinctive word; edit `gen.py`, regenerate, re-ingest that customer.
 
 Full-corpus mode ingests 13 unique PDFs from the 14 files, then runs this checker. Live mode is a separate seed: after full validation, while processing is stopped, clear acme's invoice rows and rebuild with acme-002/acme-003 only, reserving acme-001 for the new-PDF correction moment. Reset to that seed before every rehearsal. Received_at makes the submitted acme-001 the latest card invoice. Keep beta-003 present and beta-004 reserved for the duplicate moment. Never run full-corpus expectations against the live seed; keep same-slug tenancy fixtures separate as well.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add qdrant/corpus_check.sh
-git commit -m "test: full corpus check against the dashboard endpoints
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add scripts/corpus_check.py scripts/test_corpus_check.py
+git commit -m "test: full corpus check against the dashboard endpoints"
 ```
 
 ---
@@ -1336,11 +1212,11 @@ One Qdrant point per customer, rebuilt in stages from an append-only log in n8n 
 <the exact JSON from spec section 11 and the eight-row table under it>
 
 ## Requirements
-Qdrant Cloud cluster with Inference enabled, n8n Cloud (1.105 or later, Data Tables), an OpenRouter key, Chrome for printing samples, Node 18 or later to run the tests.
+Qdrant Cloud cluster with Inference enabled, n8n Cloud (1.105 or later, Data Tables), an OpenRouter key, Chrome for printing samples, Python 3.11 or later (standard library only) for the scripts, Node 18 or later to run the Code-node and dashboard tests.
 
 ## Setup in Three Steps
 
-1. Create a free Qdrant Cloud cluster with Inference enabled. Copy `.env.example` to `.env`, fill it in, run `qdrant/setup.sh`, then `qdrant/smoke.sh`.
+1. Create a free Qdrant Cloud cluster with Inference enabled. Copy `.env.example` to `.env`, fill it in, run `python3 scripts/setup_collection.py`, then `python3 scripts/smoke.py`.
 2. In n8n Cloud create two credentials: `Qdrant api-key` (Header Auth, header `api-key`) and `OpenRouter bearer` (Header Auth, header `Authorization`, value `Bearer <key>`). Create the two Data Tables as listed in `docs/superpowers/specs/2026-10-09-invoice-memory-design.md`, section 4.
 3. Import the seven JSON files from `workflows/` (Workflows → Import from File), reassign the two credentials on each HTTP Request node, open the `Start here` sticky in `01 Ingest`, set the `Config` values, activate trigger workflows after rebinding Data Tables and sub-workflow references. Open `dashboard/index.html` from any static server and enter your n8n base URL.
 
@@ -1381,9 +1257,7 @@ Expected: `1` or more in each.
 
 ```bash
 git add README.md booth
-git commit -m "docs: README with the one-request exhibit, booth script, printed cards
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "docs: README with the one-request exhibit, booth script, printed cards"
 ```
 
 ---
@@ -1395,7 +1269,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Three timed runs of the 60 s script.** Record start-to-finish seconds and the stage timers from the dashboard for each run in `booth/rehearsal.md`. If any run exceeds 75 s, cut the restore moment first, then the overdue filter, per the spec's cut order.
 
-- [ ] **Step 2: Warm-up checklist** at the top of `booth/rehearsal.md`: `qdrant/smoke.sh` passes, `qdrant/corpus_check.sh` passes, one warm-up Form submission done, dashboard open on both screens with the chime unmuted on the presenter side, Qdrant Cloud dashboard tab open on the acme point with `deleted_at` scrolled to the top, phone hotspot tested.
+- [ ] **Step 2: Warm-up checklist** at the top of `booth/rehearsal.md`: `python3 -m unittest discover -s scripts` passes, `python3 scripts/smoke.py` passes, `python3 scripts/corpus_check.py` passes, one warm-up Form submission done, dashboard open on both screens with the chime unmuted on the presenter side, Qdrant Cloud dashboard tab open on the acme point with `deleted_at` scrolled to the top, phone hotspot tested.
 
 - [ ] **Step 3: Record the full flow** with QuickTime screen recording, save as `booth/insurance.mp4`, bind it to a keyboard shortcut (Automator Quick Action or a Dock alias) and test the shortcut once.
 
@@ -1404,7 +1278,5 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```bash
 echo 'booth/insurance.mp4' >> .gitignore
 git add .gitignore booth/rehearsal.md
-git commit -m "docs: rehearsal timings and warm-up checklist
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "docs: rehearsal timings and warm-up checklist"
 ```

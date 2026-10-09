@@ -332,8 +332,11 @@ Cloud `latency_ms` spans n8n Qdrant HTTP calls; Local `latency_ms` measures Qdra
 ```
 n8n-invoice-memory/
   README.md                  hook, 3-step setup, GIF of a card sharpening, feature one-liners
-  qdrant/setup.sh            create collection + indexes via curl, idempotent
-  qdrant/smoke.sh            upsert one point with inference, scroll with nested filter, formula query, assert hits
+  scripts/                   Python 3.11+ stdlib only, unittest beside each module (rules: plan, Script Rules)
+    setup_collection.py      create or verify the collection, shard keys, and indexes, idempotent
+    bodies.py                reference Qdrant request bodies the workflows rebuild
+    smoke.py                 every request shape against a disposable collection
+    check_point.py, reads_check.py, writes_check.py, corpus_check.py, openrouter_check.py
   workflows/01-ingest.json … 06-purge.json (including 02b narrative)
   dashboard/index.html, app.js, app.test.js
   samples/gen.py, print.sh, *.pdf
@@ -344,7 +347,7 @@ n8n-invoice-memory/
 
 README hook: "Pick an invoice PDF. Two seconds later the manager's dashboard has an answer. A worse answer, then a better one, then a summary." Second section of the README is "Eight Primitives, One Request" with the body from section 11.
 
-Setup: (1) create a gated Qdrant Cloud cluster and run `qdrant/setup.sh`; (2) create two credentials and the two Data Tables; (3) import workflows in dependency order (03, 02b, 02, 01, 04, 05, 06), rebind credentials/table/sub-workflow selections, configure worker/manager maps and URLs, activate triggers, select a reserved sample in the Form, and serve/configure the localhost dashboard. Triggers ship with pinned data so an opened workflow shows items before any credential exists.
+Setup: (1) create a gated Qdrant Cloud cluster and run `python3 scripts/setup_collection.py`; (2) create two credentials and the two Data Tables; (3) import workflows in dependency order (03, 02b, 02, 01, 04, 05, 06), rebind credentials/table/sub-workflow selections, configure worker/manager maps and URLs, activate triggers, select a reserved sample in the Form, and serve/configure the localhost dashboard. Triggers ship with pinned data so an opened workflow shows items before any credential exists.
 
 Printed cards: A5 "Eight Primitives, One Request" (request on the front, table on the back), two manager name cards, the QR card. Feature one-liners (README and the card's back, presenter speaks two):
 - Tenant index: one collection, no Switch node routing to five credentials.
@@ -359,20 +362,20 @@ Answer to "why not the Qdrant Vector Store node": "Right default for one-vector-
 ## 13. Verification
 
 Day-1 checks, each can change the plan:
-- `qdrant/smoke.sh` passes: custom sharding and shard keys accepted, inference models accepted in upsert (`summary`, `digest` as multivector, `bm25`), nested filter on `invoices[]` returns the seeded point, the section 11 request returns it with inference inside `prefetch` and the formula on the indexed datetime.
+- `scripts/smoke.py` passes on a disposable collection: custom sharding and shard keys accepted, inference models accepted in upsert (`summary`, `digest` as multivector, `bm25`), nested filter on `invoices[]` returns the seeded point and rejects a decoy whose conditions hold on different invoices, the other manager's same-slug point stays isolated, soft delete, restore, and purge by filter behave, the section 11 request returns it with inference inside `prefetch` and the formula on the indexed datetime.
 - Pinned OpenRouter model accepts PDF file input and `response_format` JSON. Selection rule: cheapest mid-tier model on openrouter.ai/models that lists both; if none, stage 2 reads extracted text instead of the PDF and the "visual" claim is dropped.
 - Data Tables and required column/update/filter operations are available on the n8n Cloud plan. An alternative store requires an explicitly revised/tested plan; Google Sheets is not a drop-in fallback.
 - Execute Sub-workflow with wait off returns the Form Ending promptly and the child can independently download the sample from its JSON inputs; measure the under-2-second target.
 - `GET /customers` under 300 ms and `GET /search` under 500 ms with the full sample corpus, recording measured n8n wall latency rather than assuming the targets pass.
-- Edge gate (`smoke.sh --edge`, section 11b) passes or the stretch is cut on day 1, not day 4.
+- Edge gate (`edge/gate.py`, section 11b) passes or the stretch is cut on day 1, not day 4.
 
 Per-workflow test matrix: every If branch and every webhook path run once with real data, screenshot of the dashboard for each. Full 60 s rehearsal three times on day 5, timed.
 
-Runnable checks include `qdrant/smoke.sh`, pure Code-node tests, dashboard controller tests, real webhook checks, and browser race/error/CORS rehearsal. Cloud/Edge gates remain external acceptance checks.
+Runnable checks include `scripts/smoke.py`, the `scripts/` unit tests, pure Code-node tests, dashboard controller tests, real webhook checks, and browser race/error/CORS rehearsal. Cloud/Edge gates remain external acceptance checks.
 
 ## 14. Build order and cuts
 
-Order: smoke.sh (incl. Edge gate) → collection → 03 Rebuild → 01 + 02 + 02b → samples/background seed with reserved live samples → 04 reads → dashboard → 05 writes → 06 purge → cards + README → [day 4: Edge sidecar + source switch] → rehearsal + recording.
+Order: smoke.py and the Edge gate → collection → 03 Rebuild → 01 + 02 + 02b → samples/background seed with reserved live samples → 04 reads → dashboard → 05 writes → 06 purge → cards + README → [day 4: Edge sidecar + source switch] → rehearsal + recording.
 
 Rough 45 h core, 55 h with the Edge stretch. Cuts in order if slipping: Edge stretch, attract loop, paper tray, chime, matched-line highlight (keep the card ring), narrative stage, restore moment. Not cut: the search box, it's the vector beat.
 
