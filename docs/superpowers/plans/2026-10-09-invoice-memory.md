@@ -460,7 +460,7 @@ function coarseRead(text) {
   const raw = g(/total[^0-9]*([0-9][0-9.,]*)/i);
   return {
     invoice_no: g(/invoice\s*(?:no\.?|number|#)\s*[:#]?\s*([A-Z0-9-]+)/i),
-    date: g(/(?:^|\n)\s*date\s*:?\s*(\d{4}-\d{2}-\d{2})/i),
+    date: g(/(?<!due\s)date\s*:?\s*(\d{4}-\d{2}-\d{2})/i),
     due_date: g(/due\s*(?:date)?\s*:?\s*(\d{4}-\d{2}-\d{2})/i),
     amount: raw === null ? null : parseFloat(raw.replace(/,/g, '')),
     vendor: g(/from\s*:?\s*([^\n]+)/i),
@@ -476,6 +476,7 @@ function toNumber(v) {
   let s = String(v).replace(/[^\d.,-]/g, '');
   if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
   else s = s.replace(/,/g, '');
+  if (!s) return NaN;
   return Number(s);
 }
 function validateFields(obj) {
@@ -921,7 +922,7 @@ Sticky notes (two): "Stages top to bottom: received → coarse (regex, on purpos
 | 11 | Process in the background | Execute Sub-workflow `02 Process`, **Wait for Sub-Workflow Completion: off**, inputs `invoice_id`, `customer_id`, `manager_id`; binary passes with the item |
 | 12 | Say it was received | Form (Form Ending). Title "Received", message "Watch the dashboard. Rough in two seconds, sharp in thirty." |
 
-Connections: 6 true → 7; 6 false → 8 → 9 → 10 → 11 → 12. Sticky: "No file field on purpose. Samples download from the repo. To accept uploads, add a File field and delete node 3."
+Connections: 6 true → 7; 6 false → 8 → 9 → 10 → 11 → 12. Add a 13th node after 10, **disabled**: Google Drive, Upload file, binary `data`, named `Keep the PDF for accounting retention`, with its own sticky "Disabled. Swap for your storage. The PDF outlives a GDPR removal of the searchable record." Sticky on the Form: "No file field on purpose. Samples download from the repo. To accept uploads, add a File field and delete node 3."
 
 - [ ] **Step 4: Test the happy path**
 
@@ -1215,7 +1216,7 @@ Generate the chime once: `python3 -c "import wave,struct,math; w=wave.open('dash
 
 - [ ] **Step 6: Manual check**
 
-Serve: `python3 -m http.server 8000 -d dashboard` and open `http://localhost:8000`. Enter the n8n base URL. Expected: Anna's cards appear with the ladder; switch to Ben, acme under Tom is gone; type `servers`, acme rings and shows `matched INV-4711 · Hetzner servers`; type `zebra`, "no matches" shows and no card dims; type 10000 in "overdue over", two cards remain. Submit `delta-001.pdf` with `w_jules` from the Form, switch to Ben: delta's card appears blurry and sharpens within 40 s with three timer values and (unmuted) three chimes; the latest amount flips from `€7,600.00` (English format parses right) to `€7,600.00`; use `acme-001.pdf` under a fresh customer row if you want to see the 12.30 → 12,300.00 flip again.
+Serve: `python3 -m http.server 8000 -d dashboard` and open `http://localhost:8000`. Enter the n8n base URL. Expected: Anna's cards appear with the ladder; switch to Ben, acme under Tom is gone; type `servers`, acme rings and shows `matched INV-4711 · Hetzner servers`; type `zebra`, "no matches" shows and no card dims; type 10000 in "overdue over", two cards remain. Submit `delta-001.pdf` with `w_jules` from the Form, switch to Ben: delta's card appears blurry and sharpens within 40 s with three timer values and (unmuted) three chimes; delta's English-format amount parses right at the coarse stage, so no flip there. To see the `€12.30` → `€12,300.00` flip, delete acme's rows from both tables and resubmit `acme-001.pdf`.
 
 - [ ] **Step 7: Commit**
 

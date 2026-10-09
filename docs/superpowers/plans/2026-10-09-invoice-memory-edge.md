@@ -261,7 +261,7 @@ if __name__ == '__main__':
     ThreadingHTTPServer(('127.0.0.1', 8787), H).serve_forever()
 ```
 
-The exact constructor names (`ScrollRequest`, `QueryRequest`, `Prefetch`, the `query` dict shapes) come from the installed `qdrant_edge` stubs; if a name differs, read `.venv/lib/python*/site-packages/qdrant_edge/*.pyi` and adjust the three call sites. The tests use a fake shard and do not depend on those names.
+The exact constructor names (`ScrollRequest`, `QueryRequest`, `Prefetch`, the `query` dict shapes) come from the installed `qdrant_edge` stubs; if a name differs, read `.venv/lib/python*/site-packages/qdrant_edge/*.pyi` and adjust the three call sites. The tests use a fake shard and do not depend on those names. If `ScrollRequest.filter` is not a plain dict in the installed version, have `handle_list` store the dict on `STATE['last_filter']` before calling `scroll`, and read that in the fake.
 
 - [ ] **Step 4: Run tests**
 
