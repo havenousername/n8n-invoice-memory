@@ -26,6 +26,21 @@ SYSTEM_PROMPT = (
 )
 
 
+def invoice_schema() -> dict:
+    """Strict JSON schema for the reply. json_object alone let Haiku 5.5 wrap its JSON in a code fence."""
+    properties = {
+        "invoice_no": {"type": "string"},
+        "date": {"type": "string", "description": "YYYY-MM-DD"},
+        "due_date": {"type": "string", "description": "YYYY-MM-DD"},
+        "amount": {"type": "number", "description": "total in EUR"},
+        "vendor": {"type": "string"},
+        "customer_name": {"type": "string"},
+        "status": {"type": "string", "enum": ["open", "paid", "overdue"]},
+        "line_items_summary": {"type": "string", "description": "max 12 words"},
+    }
+    return {"type": "object", "properties": properties, "required": list(REQUIRED_FIELDS), "additionalProperties": False}
+
+
 class ExtractionError(Exception):
     pass
 
@@ -40,7 +55,10 @@ def extraction_body(pdf: bytes, model: str, engine: str) -> dict:
         "model": model,
         "temperature": 0,
         "max_tokens": 400,
-        "response_format": {"type": "json_object"},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "invoice", "strict": True, "schema": invoice_schema()},
+        },
         "plugins": [{"id": "file-parser", "pdf": {"engine": engine}}],
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},

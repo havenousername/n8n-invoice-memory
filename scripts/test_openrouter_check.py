@@ -22,12 +22,27 @@ class ExtractionBodyTest(unittest.TestCase):
     def setUp(self):
         self.body = extraction_body(PDF, "anthropic/claude-haiku-5.5", "native")
 
-    def test_model_settings_and_json_mode(self):
+    def test_model_settings(self):
         self.assertEqual(self.body["model"], "anthropic/claude-haiku-5.5")
         self.assertEqual(self.body["temperature"], 0)
         self.assertEqual(self.body["max_tokens"], 400)
-        self.assertEqual(self.body["response_format"], {"type": "json_object"})
         self.assertEqual(self.body["plugins"], [{"id": "file-parser", "pdf": {"engine": "native"}}])
+
+    def test_strict_schema_constrains_the_reply(self):
+        # json_object alone let the model wrap its JSON in a code fence; a strict schema does not.
+        response_format = self.body["response_format"]
+        self.assertEqual(response_format["type"], "json_schema")
+        self.assertTrue(response_format["json_schema"]["strict"])
+        schema = response_format["json_schema"]["schema"]
+        self.assertEqual(schema["required"], list(REQUIRED_FIELDS))
+        self.assertEqual(set(schema["properties"]), set(REQUIRED_FIELDS))
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(schema["properties"]["amount"], {"type": "number", "description": "total in EUR"})
+        self.assertEqual(schema["properties"]["status"]["enum"], ["open", "paid", "overdue"])
+
+    def test_each_body_gets_its_own_schema(self):
+        extraction_body(PDF, "m", "native")["response_format"]["json_schema"]["schema"]["required"].clear()
+        self.assertEqual(len(self.body["response_format"]["json_schema"]["schema"]["required"]), 8)
 
     def test_engine_is_passed_through(self):
         body = extraction_body(PDF, "m", "pdf-text")
