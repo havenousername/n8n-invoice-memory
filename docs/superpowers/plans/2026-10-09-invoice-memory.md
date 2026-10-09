@@ -234,9 +234,9 @@ git commit -m "test(scripts): reference request bodies and a disposable-collecti
 - `require_synthetic(path: Path, samples_dir: Path) -> Path`: raises `ValueError` unless the resolved path is a PDF inside `samples/`, so no real invoice is ever sent
 - `main(argv)`: `python3 scripts/openrouter_check.py samples/acme-001.pdf` sends with the `Authorization: Bearer` header and a 35 s timeout, prints the fields as JSON and `latency_ms` measured with `time.monotonic`
 
-- [ ] **Step 1: Write the failing tests** for each interface line above: the body's model, temperature, response format, plugin engine, data URL decoding back to the input bytes, and all eight field names in the system prompt; `parse_reply` on a good reply, no choices, fenced JSON, and two missing fields; `require_synthetic` on a sample, a path outside `samples/`, and a `..` escape.
+- [x] **Step 1: Write the failing tests** for each interface line above: the body's model, temperature, response format, plugin engine, data URL decoding back to the input bytes, and all eight field names in the system prompt; `parse_reply` on a good reply, no choices, fenced JSON, and two missing fields; `require_synthetic` on a sample, a path outside `samples/`, and a `..` escape.
 
-- [ ] **Step 2: Run, verify they fail; implement; run, verify they pass**
+- [x] **Step 2: Run, verify they fail; implement; run, verify they pass**
 
 Run: `python3 -m unittest discover -s scripts`
 
