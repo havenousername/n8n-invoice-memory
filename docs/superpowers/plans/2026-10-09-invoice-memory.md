@@ -86,7 +86,7 @@ Payload indexes, in order: `manager_id` keyword with `is_tenant: true`; `worker_
 QDRANT_URL=https://xxxx.cloud.qdrant.io:6333
 QDRANT_API_KEY=
 OPENROUTER_API_KEY=
-OPENROUTER_MODEL=google/gemini-2.5-flash
+OPENROUTER_MODEL=anthropic/claude-haiku-5.5
 PDF_ENGINE=native
 N8N_BASE_URL=https://yourname.app.n8n.cloud
 ```

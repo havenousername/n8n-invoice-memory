@@ -20,10 +20,10 @@ def reply(content) -> dict:
 
 class ExtractionBodyTest(unittest.TestCase):
     def setUp(self):
-        self.body = extraction_body(PDF, "google/gemini-2.5-flash", "native")
+        self.body = extraction_body(PDF, "anthropic/claude-haiku-5.5", "native")
 
     def test_model_settings_and_json_mode(self):
-        self.assertEqual(self.body["model"], "google/gemini-2.5-flash")
+        self.assertEqual(self.body["model"], "anthropic/claude-haiku-5.5")
         self.assertEqual(self.body["temperature"], 0)
         self.assertEqual(self.body["max_tokens"], 400)
         self.assertEqual(self.body["response_format"], {"type": "json_object"})
