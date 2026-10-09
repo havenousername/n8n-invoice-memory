@@ -292,6 +292,6 @@ Rough 40 h. Cuts in order if slipping: attract loop, paper tray, chime, narrativ
 ## 14. Assumptions
 
 - Qdrant Cloud cluster has Inference enabled and the three free hosted models listed above.
-- n8n Cloud plan has Data Tables and allows Execute Sub-workflow without waiting.
+- n8n Cloud plan has Data Tables (built-in, 200 MiB per instance, kilobytes used here) and allows Execute Sub-workflow without waiting.
 - Booth wifi works; phone hotspot as backup.
 - Nobody at the booth uploads a real invoice. Form page says "synthetic data only".
