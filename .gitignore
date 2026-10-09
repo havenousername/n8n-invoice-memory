@@ -1,0 +1,7 @@
+.env
+samples/html/
+*.pdf
+!samples/*.pdf
+node_modules/
+__pycache__/
+edge/data/
