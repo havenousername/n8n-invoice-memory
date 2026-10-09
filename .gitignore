@@ -5,3 +5,4 @@ samples/html/
 node_modules/
 __pycache__/
 edge/data/
+.DS_Store
