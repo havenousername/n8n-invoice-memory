@@ -355,10 +355,10 @@ git commit -m "feat(samples): 14 synthetic invoice PDFs, two in German number fo
 ### Task 6: Data Tables and Workflow 03 Rebuild Point
 
 **Files:**
-- Create in n8n Cloud: Data Tables `invoices`, `customers`; workflow `03 Rebuild point`
-- Export: `workflows/03-rebuild-point.json`
-- Create: `scripts/check_point.py`, `scripts/test_check_point.py`
-- Test: unit tests, then `scripts/check_point.py` against a hand-seeded customer
+- Create in n8n Cloud: Data Tables `invoices`, `customers`; credential `Qdrant api-key`; import of `03 Rebuild point`
+- Create: `scripts/check_point.py`, `scripts/test_check_point.py`, `scripts/build_workflows.py`, `scripts/test_build_workflows.py`, `workflows/nodes/compute-the-view.js`, `workflows/code/rebuild-point.test.js`
+- Generated: `workflows/03-rebuild-point.json` (`python3 scripts/build_workflows.py`; a test fails if it is stale)
+- Test: unit tests, the generated Code node run in a sandbox, then `scripts/check_point.py` against a hand-seeded customer
 
 **Interfaces:**
 - Consumes: `computeView`, `uuidFromHex` from Task 4 (pasted).
@@ -372,12 +372,13 @@ git commit -m "feat(samples): 14 synthetic invoice PDFs, two in German number fo
 
 Seed two rows by hand in `customers`: (`acme`, `w_tom`, `m_anna`, `Acme GmbH`) and (`acme`, `w_jules`, `m_ben`, `Acme GmbH`). Seed one row in `invoices` for each: invoice_id `inv_seed_a` / `inv_seed_b`, stage `1`, `regex_fields` = `{"invoice_no":"INV-4711","amount":12.3,"status":"open"}`, `text` = `seed`, `received_at` = now.
 
-- [ ] **Step 2: Write `scripts/check_point.py`** test-first (the point check for this and later tasks)
+- [x] **Step 2: Write `scripts/check_point.py`** test-first (the point check for this and later tasks)
 
 Interface:
 - `get_path(payload: dict, path: str) -> Any`: dot path where integer segments index lists (`latest.amount`, `invoices.0.error`); a missing segment raises `KeyError` naming the path
 - `parse_expectation(text: str) -> tuple[str, Any]`: splits on the first `=`; the value parses as JSON, falling back to the raw string (`stage=1` gives `1`, `worker_id=w_tom` gives `"w_tom"`)
 - `failures(payload: dict, expects: Mapping[str, Any], present: Iterable[str], absent: Iterable[str]) -> list[str]`: one line per unmet expectation, `[]` when all hold
+- `show(payload, paths) -> str`: `path=value` pairs, values as JSON, `<missing>` for absent paths
 - `main(argv)`: `python3 scripts/check_point.py MANAGER CUSTOMER [--show a,b] [--expect path=value]... [--present path]... [--absent path]...` reads the point with `bodies.customer_scroll`. With no flags it prints the payload as JSON. `--show` prints `path=value` pairs on one line. Exit 0 when every expectation holds (prints `ok`), 1 with each failure printed, 2 with `no point for MANAGER/CUSTOMER`.
 
 Tests: `get_path` on nested dicts, list indexes, and a missing path; `parse_expectation` on integer, float, string, and a value containing `=`; `failures` on a matching payload, a wrong value, and `present`/`absent` both ways.
@@ -385,7 +386,11 @@ Tests: `get_path` on nested dicts, list indexes, and a missing path; `parse_expe
 Run: `python3 -m unittest discover -s scripts`, then `python3 scripts/check_point.py m_anna acme`
 Expected: `OK`, then `no point for m_anna/acme` with exit 2 (the workflow doesn't exist yet).
 
-- [ ] **Step 3: Build workflow `03 Rebuild point`** (nodes in order; names are the sentences)
+- [x] **Step 3: Generate workflow `03 Rebuild point`** (nodes in order; names are the sentences)
+
+`scripts/build_workflows.py` writes the importable JSON: no instance ids, Data Tables referenced by name, the credential by name, the cluster URL as `https://REPLACE.cloud.qdrant.io:6333`, and the trigger's test input pinned. The Code node is `ids.js` and `view.js` pasted without `module.exports`, followed by `workflows/nodes/compute-the-view.js`. Node parameter names were checked against n8n's source (`dataTable` 1.1, `crypto` 2, `executeWorkflowTrigger` 1.1). Both Data Table reads use `.first()` references to Config and run once, so a stray duplicate row cannot double the invoice list.
+
+Tests: `test_build_workflows.py` checks order, chaining, trigger inputs, tenant-scoped reads, the pasted sources, the named credential, the single placeholder URL, and that the committed JSON matches the sources. `rebuild-point.test.js` runs the generated Code node with stand-ins for `$()`: seeded rows become one upsert body for the tenant shard, the Always Output Data empty item is not a row, and a missing or duplicated customer row stops the run.
 
 | # | Node | Settings |
 |---|---|---|
@@ -397,29 +402,11 @@ Expected: `OK`, then `no point for m_anna/acme` with exit 2 (the workflow doesn'
 | 6 | Compute the view | Code, Run once for all items. Body below |
 | 7 | Upsert the point with inference | HTTP Request. PUT `={{ $('Config').item.json.QDRANT_URL }}/collections/{{ $('Config').item.json.COLLECTION }}/points?wait=true`. Auth: Header Auth, `Qdrant api-key`. Body: JSON, Using fields below: `={{ $json.body }}` as raw JSON (Specify Body: Using JSON, JSON: `={{ JSON.stringify($json.body) }}`) |
 
-Code node 6 builds the same JSON as `bodies.upsert` (compare with `python3 scripts/bodies.py`). Paste `workflows/code/ids.js` and `view.js` whole, each without its `module.exports` line (the helpers inside them are needed), then:
-
-```js
-const cfg = $('Config').first().json;
-const customers = $('Load the customer row').all().map(i => i.json).filter(r => r.customer_id);
-const invoices = $('Load all invoice rows').all().map(i => i.json).filter(r => r.invoice_id);
-if (!customers.length) throw new Error(`no customer row for ${cfg.manager_id}/${cfg.customer_id}`);
-const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-const { payload, texts } = computeView(customers[0], invoices, now);
-const id = uuidFromHex($('Hash the point id').first().json.idhash);
-return [{ json: { body: {
-  shard_key: cfg.manager_id,
-  points: [{ id, payload, vector: {
-    summary: { text: texts.summary, model: 'sentence-transformers/all-minilm-l6-v2' },
-    digest:  { text: texts.digest,  model: 'answerdotai/answerai-colbert-small-v1' },
-    bm25:    { text: texts.bm25,    model: 'qdrant/bm25' },
-  }}],
-}}}];
-```
+Code node 6 builds the same JSON as `bodies.upsert` (compare with `python3 scripts/bodies.py`); its glue is `workflows/nodes/compute-the-view.js`.
 
 Sticky note (one): "Source of truth is the two Data Tables. This workflow is the only writer to Qdrant. Any stage, any retry, same point."
 
-- [ ] **Step 4: Test manually with the seeded rows**
+- [ ] **Step 4: Test manually with the seeded rows** (after Step 5)
 
 In the workflow editor, run with test input `{"customer_id": "acme", "manager_id": "m_anna"}`, then again with `m_ben`.
 
@@ -427,17 +414,14 @@ Run: `python3 scripts/check_point.py m_anna acme --expect stage=1 --expect lates
 Run: `python3 scripts/check_point.py m_ben acme --expect worker_id=w_jules`
 Expected: both print `ok`. Two points exist for slug `acme` (Review Focus 3).
 
-- [ ] **Step 5: Export and scrub**
+- [ ] **Step 5: Import and bind** (n8n Cloud)
 
-Download the workflow JSON to `workflows/03-rebuild-point.json`. Open it and confirm: no `"id"` inside any `credentials` block that is an instance-specific id (keep only `"name"`), no cluster URL except in the `Config` node (set its value to `https://REPLACE.cloud.qdrant.io:6333`). Pin the trigger's test input before export so an importer sees items.
-
-Run: `grep -c 'cloud.qdrant.io' workflows/03-rebuild-point.json`
-Expected: `1`.
+Create the `Qdrant api-key` credential (Header Auth, name `api-key`, value the cluster key). Workflows → Import from File → `workflows/03-rebuild-point.json`. On `Upsert the point with inference`, select the credential. In `Config`, set `QDRANT_URL` to the cluster URL. Open each Data Table node once to confirm it resolved its table by name. Save. Then run Step 4.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add workflows/03-rebuild-point.json scripts/check_point.py scripts/test_check_point.py
+git add workflows scripts
 git commit -m "feat(n8n): 03 Rebuild point sub-workflow; point check script"
 ```
 
