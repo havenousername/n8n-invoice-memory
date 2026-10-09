@@ -169,7 +169,7 @@ git commit -m "feat(scripts): settings, transport, collection schema, and idempo
   - `customer_scroll(manager: str, customer: str) -> dict`: one point by tenant and slug, full payload
   - `hybrid_query(manager: str, text: str, now_iso: str, limit: int = 5) -> dict`: the spec section 11 request, `with_payload: ["customer_id", "invoices"]`
   - `purge(manager: str, customer: str, cutoff_iso: str) -> dict`: delete filter on `manager_id`, `customer_id`, and `deleted_at` range `lt` cutoff
-- `smoke.py` (acceptance script): `smoke_collection_name(now_iso: str, suffix: str) -> str` returns `invoice_memory_smoke_<yyyymmddHHMMSS>_<suffix>`; `fixture_points(now_iso: str) -> list[tuple[str, dict]]` returns (manager, point) pairs; `run_smoke(call: QdrantCall, collection: str, now_iso: str) -> list[str]` returns the names of passed checks or raises `SmokeFailure(check, detail)`; `drop_smoke_collection(call, name)` raises `ValueError` for any name without the smoke prefix, including `customers`. `main` always drops the collection in `finally`.
+- `smoke.py` (acceptance script): `smoke_collection_name(now_iso: str, suffix: str) -> str` returns `invoice_memory_smoke_<yyyymmddHHMMSS>_<suffix>`; `fixture_points(now_iso: str) -> list[Fixture]` returns frozen `Fixture(manager, point_id, payload, texts)` values, and `with_deleted_at(fixture, iso_or_none) -> Fixture` returns a copy with the tombstone set or cleared; `run_smoke(call: QdrantCall, collection: str, now_iso: str) -> list[str]` returns the names of passed checks or raises `SmokeFailure(check, detail)`; `drop_smoke_collection(call, name)` raises `ValueError` for any name without the smoke prefix, including `customers`. `main` always drops the collection in `finally`.
 
 Fixtures:
 - `m_anna/smoke`: one overdue invoice of 12300.00, items "Hetzner servers"
@@ -186,7 +186,7 @@ Checks, in order:
 7. `restore`: re-upserting it without `deleted_at` brings it back with no `deleted_at` in the payload
 8. `purge`: after a second soft delete, `purge("m_anna", "smoke", <now minus 30 days>)` deletes it; `m_anna/decoy` and `m_ben/smoke` survive
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `test_bodies.py`:
 - `hybrid_query("m_anna", "servers", "2026-10-14T00:00:00Z")` equals the spec section 11 exhibit, apart from `with_payload`
@@ -202,17 +202,17 @@ Checks, in order:
 - fixture point ids are distinct, fixed, valid UUIDs
 - the decoy has an overdue invoice and an invoice of at least 10000, never both on one invoice
 
-- [ ] **Step 2: Run, verify they fail; implement `bodies.py` and `smoke.py`; run, verify they pass**
+- [x] **Step 2: Run, verify they fail; implement `bodies.py` and `smoke.py`; run, verify they pass**
 
 Run: `python3 -m unittest discover -s scripts`
 Expected: failures first, then `OK`.
 
-- [ ] **Step 3: Run the smoke test against the cluster**
+- [x] **Step 3: Run the smoke test against the cluster**
 
 Run: `python3 scripts/smoke.py`
 Expected: eight `ok <check>` lines, then `SMOKE PASSED`; the smoke collection is gone afterwards (`GET /collections` lists no `invoice_memory_smoke_` name). Failure modes and what to change: `upsert` rejects an inference model, so check the cluster's Inference tab and change the string in `schema.MODELS`; `hybrid` rejects `nearest` inside `prefetch`, so move the inference object to `"query": {"text": ..., "model": ...}` per the error message and update `bodies.hybrid_query` and spec section 11; `nested` fails, so check that the `invoices[].status` index exists.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/bodies.py scripts/smoke.py scripts/test_bodies.py scripts/test_smoke.py
