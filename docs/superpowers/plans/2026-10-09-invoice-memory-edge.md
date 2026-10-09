@@ -1,347 +1,71 @@
 # Invoice Memory Edge Replica Implementation Plan (Stretch)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Goal:** A local Qdrant Edge replica of one manager's shard on the booth laptop, serving the dashboard's list, filter, and search while offline.
 
-**Goal:** A local Qdrant Edge replica of one manager's shard on the booth laptop, so the dashboard keeps answering list, filter, and search with the wifi off.
+**Architecture:** A read-only Python sidecar loads a durable last-good generation before attempting cloud sync. A full shard snapshot initializes it; subsequent syncs request partial snapshots every 10 s. Every update is prepared in a separate generation and published only after validation. FastEmbed query models are cached and warmed before offline use. Dashboard reads select Cloud or Local; writes always require Cloud.
 
-**Architecture:** A Python sidecar restores the manager's shard snapshot into an immutable Edge Shard, pulls partial snapshots every 10 s, and serves the same two read endpoints as the n8n workflow on `localhost:8787`, embedding search queries locally with FastEmbed. The dashboard gets a `Cloud | Local` switch with automatic fallback.
+**Tech stack:** `qdrant-edge-py`, `fastembed`, Python stdlib HTTP server and urllib. Pin versions only after the live gate passes on the actual laptop and cloud cluster.
 
-**Tech Stack:** `qdrant-edge-py`, `fastembed`, Python stdlib `http.server`, `urllib`. Reuses `dashboard/app.js` and the response shapes from the core plan's Task 8.
+**Contracts:** Spec section 11b; core plan Tasks 4, 8, 9, and 12 in `docs/superpowers/plans/2026-10-09-invoice-memory.md`. This revision changes the implementation plan only; every checkbox below is future work. No deployed-cluster or local-package gate has been run as part of this revision.
 
-**Spec:** `docs/superpowers/specs/2026-10-09-invoice-memory-design.md`, section 11b. Depends on the core plan through Task 12.
+## Global Constraints and Verified API Boundaries
 
-Gate: Task 1 runs on day 1 alongside the core smoke test. If it fails, this plan is cut and nothing else here is attempted.
+- Apply core Global Constraints. This stretch is cut if any day-1 gate fails; do not delay the core build or ship full snapshots on a timer under a partial-sync claim.
+- Edge is beta. Local Remove and Restore are disabled with “writes need the cloud”; never send writes to the sidecar.
+- Tenant scope is fixed by `EDGE_MANAGER`, not a browser parameter. Reject another manager before querying, even though every request also carries the manager payload filter. A manager shard must contain only that manager. If the key maps to multiple distinct shard IDs, cut this single-shard stretch rather than silently picking the first.
+- FastEmbed models correspond to Cloud Inference `sentence-transformers/all-minilm-l6-v2`, `qdrant/bm25`, and `answerdotai/answerai-colbert-small-v1`. Resolve the actual supported FastEmbed names in the pinned package (including MiniLM casing); matching names alone does not prove matching tokenizer, preprocessing, dimensions, or query behavior.
+- No cloud key in the browser. The sidecar reads environment configuration; its data and model cache directories are gitignored. Bind to `127.0.0.1`.
 
-## Global Constraints
+Verified against official documentation on 2026-10-09:
 
-- Everything in the core plan's Global Constraints.
-- Edge is beta: the printed card and README say so.
-- Writes never go to Edge. Remove and Restore are disabled on Local, labeled "writes need the cloud".
-- Local search uses the same three models as Cloud Inference so cloud-written vectors and local query vectors match: FastEmbed `sentence-transformers/all-MiniLM-L6-v2`, `Qdrant/bm25`, `answerdotai/answerai-colbert-small-v1`.
-- No API key in the browser. The sidecar holds the key in `.env`.
+- The synchronization guide documents streamed `GET /collections/{collection}/shards/{id}/snapshot` for a full shard snapshot, then `POST /collections/{collection}/shards/{id}/snapshot/partial/create` with the current manifest as the JSON body for partial snapshots. Permission and routing on the selected Cloud cluster remain live gates. [Synchronize with a Server](https://qdrant.tech/documentation/edge/edge-synchronization-guide/)
+- Python exposes `EdgeShard.unpack_snapshot(path, directory)`, `snapshot_manifest()`, and `update_from_snapshot(path, tmp_dir=None)`. The last operation mutates the open shard's files; the docs do not promise transactional rollback on failure. Therefore apply it only to a candidate copy. [Snapshots API](https://qdrant.tech/documentation/edge/edge-api/snapshots/)
+- Python requests use constructors with typed `Filter`, `Query`, `Fusion`, `OrderBy`, and `Formula`; REST request dictionaries are not a proven Python binding interface. `query` returns scored points; `scroll` returns records and an offset. Compile the exact typed adapter during Task 1, including all nested conditions, RRF, and decay, rather than guessing constructor names at implementation time. [Reading Data](https://qdrant.tech/documentation/edge/edge-api/reading-data/)
+- Python has explicit `close()`, allowing retired handles to be closed before disk cleanup. [Shard Lifecycle](https://qdrant.tech/documentation/edge/edge-api/shard-lifecycle/)
+- FastEmbed exposes query-specific embedding APIs; BM25 `query_embed` differs from document embedding. Its model loader supports an explicit cache and `local_files_only`, also honoring `HF_HUB_OFFLINE`. Confirm support in every pinned model constructor and run with blocked outbound access. [Dense source](https://github.com/qdrant/fastembed/blob/main/fastembed/text/text_embedding.py), [BM25 source](https://github.com/qdrant/fastembed/blob/main/fastembed/sparse/bm25.py), [Model management source](https://github.com/qdrant/fastembed/blob/main/fastembed/common/model_management.py)
 
-## Review Focus
-
-1. Snapshot download for a shard key that maps to a numeric shard id the sidecar must look up, not guess. Pinned in Task 1 (`--edge` gate reads `/collections/customers/cluster`).
-2. A partial snapshot that fails mid-apply must leave the previous shard serving, never an empty grid. Pinned in Task 2 (`test_sidecar.py`, "apply failure keeps old shard").
-3. The dashboard must not flip to Local on a single slow poll. Pinned in Task 3 (three failures rule, `app.test.js` addition).
-4. `deleted_at` must hide locally with the same `is_empty` filter. Pinned in Task 2 (sidecar list test with a soft-deleted point).
-5. Local BM25 idf is computed over the local shard, so scores differ from cloud; ordering may differ for ties. Documented in the README, not tested.
-
----
-
-### Task 1: Edge Gate
-
-**Files:**
-- Modify: `qdrant/smoke.sh` (add `--edge` branch at the end)
-- Create: `edge/requirements.txt`
-
-- [ ] **Step 1: `edge/requirements.txt`**
-
-```
-qdrant-edge-py
-fastembed
-```
-
-- [ ] **Step 2: Append to `qdrant/smoke.sh`, before the final echo**
-
-```bash
-if [ "${1:-}" = "--edge" ]; then
-  echo "6. edge gate"
-  python3 -m venv ../edge/.venv && ../edge/.venv/bin/pip -q install -r ../edge/requirements.txt
-  SHARD=$(q GET "$C/cluster" | python3 -c 'import sys,json; d=json.load(sys.stdin)["result"]; s=[x for x in d["local_shards"] if x.get("shard_key")=="m_anna"]; assert s, d; print(s[0]["shard_id"])')
-  echo "   shard id for m_anna: $SHARD"
-  SNAP=$(q POST "$C/shards/$SHARD/snapshots?wait=true" | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["name"])')
-  curl -sS -o /tmp/m_anna.snapshot -H "api-key: $QDRANT_API_KEY" "$QDRANT_URL$C/shards/$SHARD/snapshots/$SNAP"
-  ls -la /tmp/m_anna.snapshot
-  ../edge/.venv/bin/python - <<'PY'
-from qdrant_edge import EdgeShard
-import tempfile, os
-d = tempfile.mkdtemp()
-EdgeShard.unpack_snapshot('/tmp/m_anna.snapshot', d)
-shard = EdgeShard.load(d)
-info = shard.info()
-print('   edge points:', info.points_count)
-assert info.points_count >= 1
-PY
-  echo "   edge gate ok (partial snapshot API is exercised in Task 2)"
-fi
-```
-
-- [ ] **Step 3: Run**
-
-Run: `qdrant/smoke.sh --edge`
-Expected: `shard id for m_anna: <n>`, a snapshot file larger than zero bytes, `edge points: N` with N ≥ 1, `edge gate ok`. If `EdgeShard.unpack_snapshot` or `load` names differ in the installed version, read `../edge/.venv/lib/python*/site-packages/qdrant_edge/__init__.pyi` and adjust; if the cluster has no `local_shards` entry with `shard_key`, custom sharding did not take and this plan is cut.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add qdrant/smoke.sh edge/requirements.txt
-git commit -m "test(edge): day-1 gate: shard snapshot download and Edge unpack
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
----
-
-### Task 2: Sidecar
-
-**Files:**
-- Create: `edge/sidecar.py`, `edge/test_sidecar.py`
-- Test: `edge/.venv/bin/python -m unittest edge/test_sidecar.py`
-
-**Interfaces:**
-- Produces: `GET http://localhost:8787/customers?manager=m_anna[&overdue_gte=N]` and `GET http://localhost:8787/search?manager=m_anna&q=...` with the same JSON shapes as the core plan's Task 8, plus `source: "local"`. `sync()` and `handle_list()`, `handle_search()` are module-level functions so the tests call them without HTTP.
-
-- [ ] **Step 1: Write `edge/test_sidecar.py`**
-
-```python
-import unittest, json, os, tempfile
-os.environ.setdefault('QDRANT_URL', 'http://unused'); os.environ.setdefault('QDRANT_API_KEY', 'x')
-import sidecar
-
-class FakeShard:
-    def __init__(self, points): self.points = points
-    def scroll(self, req):
-        def ok(p):
-            f = req.filter or {}
-            for c in f.get('must', []):
-                if 'is_empty' in c and p['payload'].get(c['is_empty']['key']): return False
-                if 'key' in c and 'match' in c and p['payload'].get(c['key']) != c['match']['value']: return False
-            for c in f.get('must_not', []):
-                if 'is_empty' in c and not p['payload'].get(c['is_empty']['key']): return False
-            return True
-        return [type('R', (), {'payload': p['payload']}) for p in self.points if ok(p)], None
-
-P = lambda cid, **o: {'payload': dict(customer_id=cid, name=cid.title(), worker_id='w_tom', manager_id='m_anna', stage=2, summary_stage=3, summary_text='n', pending_count=0, invoice_count=1, open_amount=5, overdue_count=0, overdue_amount=0, latest={'invoice_no': 'I', 'amount': 5, 'stage': 2}, updated_at='u', invoices=[], **o)}
-
-class T(unittest.TestCase):
-    def test_list_hides_deleted_and_lists_removed(self):
-        sidecar.STATE['shard'] = FakeShard([P('acme'), P('beta', deleted_at='2026-10-01T00:00:00Z')])
-        d = sidecar.handle_list({'manager': 'm_anna'})
-        self.assertEqual([c['customer_id'] for c in d['cards']], ['acme'])
-        self.assertEqual(d['removed'][0]['purge_at'], '2026-10-31T00:00:00Z')
-        self.assertEqual(d['source'], 'local'); self.assertIn('latency_ms', d)
-    def test_apply_failure_keeps_old_shard(self):
-        old = FakeShard([P('acme')]); sidecar.STATE['shard'] = old
-        def boom(): raise RuntimeError('network')
-        sidecar.sync(download=boom)
-        self.assertIs(sidecar.STATE['shard'], old)
-        self.assertTrue(sidecar.STATE['last_error'])
-
-if __name__ == '__main__': unittest.main()
-```
-
-- [ ] **Step 2: Run, verify failure**
-
-Run: `cd edge && .venv/bin/python -m unittest test_sidecar.py`
-Expected: `ModuleNotFoundError: sidecar`.
-
-- [ ] **Step 3: Write `edge/sidecar.py`**
-
-```python
-#!/usr/bin/env python3
-"""Local Qdrant Edge replica of one manager's shard. Serves the dashboard's two read endpoints on :8787."""
-import json, os, sys, time, threading, tempfile, shutil, urllib.request, urllib.parse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from datetime import datetime, timedelta, timezone
-
-QDRANT_URL = os.environ['QDRANT_URL']; KEY = os.environ['QDRANT_API_KEY']
-MANAGER = os.environ.get('EDGE_MANAGER', 'm_anna'); COLL = 'customers'
-DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', MANAGER)
-WORKERS = json.loads(os.environ.get('WORKERS', '{"w_tom":{"name":"Tom"},"w_lena":{"name":"Lena"},"w_jules":{"name":"Jules"},"w_mia":{"name":"Mia"}}'))
-STATE = {'shard': None, 'shard_id': None, 'last_sync': None, 'last_error': '', 'models': None}
-
-def api(method, path, body=None):
-    req = urllib.request.Request(QDRANT_URL + path, method=method, headers={'api-key': KEY, 'content-type': 'application/json'},
-                                 data=json.dumps(body).encode() if body is not None else None)
-    with urllib.request.urlopen(req, timeout=20) as r: return json.load(r)
-
-def shard_id():
-    if STATE['shard_id'] is None:
-        d = api('GET', f'/collections/{COLL}/cluster')['result']
-        STATE['shard_id'] = next(s['shard_id'] for s in d['local_shards'] if s.get('shard_key') == MANAGER)
-    return STATE['shard_id']
-
-def download_snapshot():
-    """Full shard snapshot. ponytail: partial snapshots need the Edge manifest API; swap in once Task 1 confirms the call shape."""
-    sid = shard_id()
-    name = api('POST', f'/collections/{COLL}/shards/{sid}/snapshots?wait=true')['result']['name']
-    path = os.path.join(tempfile.gettempdir(), f'{MANAGER}.snapshot')
-    req = urllib.request.Request(f'{QDRANT_URL}/collections/{COLL}/shards/{sid}/snapshots/{name}', headers={'api-key': KEY})
-    with urllib.request.urlopen(req, timeout=60) as r, open(path, 'wb') as f: shutil.copyfileobj(r, f)
-    api('DELETE', f'/collections/{COLL}/shards/{sid}/snapshots/{name}')
-    return path
-
-def sync(download=download_snapshot):
-    from qdrant_edge import EdgeShard
-    try:
-        path = download()
-        new_dir = DATA + '.new'; shutil.rmtree(new_dir, ignore_errors=True); os.makedirs(new_dir)
-        EdgeShard.unpack_snapshot(path, new_dir)
-        shard = EdgeShard.load(new_dir)
-        STATE['shard'] = shard; STATE['last_sync'] = time.time(); STATE['last_error'] = ''
-    except Exception as e:  # keep serving the previous shard
-        STATE['last_error'] = f'{type(e).__name__}: {e}'
-
-def plus30(iso): return (datetime.fromisoformat(iso.replace('Z', '+00:00')) + timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
-
-def card(q):
-    return dict(customer_id=q['customer_id'], name=q['name'], worker=WORKERS.get(q['worker_id'], {}).get('name', q['worker_id']),
-                stage=q['stage'], rung=3 if q.get('summary_stage') == 3 else q['stage'], pending_count=q['pending_count'],
-                invoice_count=q['invoice_count'], open_amount=q['open_amount'], overdue_count=q['overdue_count'],
-                overdue_amount=q['overdue_amount'], latest=q.get('latest'), narrative=q['summary_text'] if q.get('summary_stage') == 3 else '',
-                updated_at=q.get('updated_at'), deleted_at=q.get('deleted_at'))
-
-def handle_list(qs):
-    from qdrant_edge import ScrollRequest
-    t = time.time(); sh = STATE['shard']
-    must = [{'key': 'manager_id', 'match': {'value': qs['manager']}}, {'is_empty': {'key': 'deleted_at'}}]
-    if qs.get('overdue_gte'):
-        must.append({'nested': {'key': 'invoices', 'filter': {'must': [{'key': 'status', 'match': {'value': 'overdue'}}, {'key': 'amount', 'range': {'gte': float(qs['overdue_gte'])}}]}}})
-    live, _ = sh.scroll(ScrollRequest(limit=50, with_payload=True, filter={'must': must}, order_by={'key': 'last_invoice_at', 'direction': 'desc'}))
-    gone, _ = sh.scroll(ScrollRequest(limit=50, with_payload=True, filter={'must': [must[0]], 'must_not': [must[1]]}))
-    return {'cards': [card(r.payload) for r in live],
-            'removed': [dict(customer_id=r.payload['customer_id'], name=r.payload['name'], deleted_at=r.payload['deleted_at'], purge_at=plus30(r.payload['deleted_at'])) for r in gone],
-            'latency_ms': int((time.time() - t) * 1000), 'source': 'local'}
-
-def models():
-    if STATE['models'] is None:
-        from fastembed import TextEmbedding, SparseTextEmbedding, LateInteractionTextEmbedding
-        STATE['models'] = (TextEmbedding('sentence-transformers/all-MiniLM-L6-v2'), SparseTextEmbedding('Qdrant/bm25'), LateInteractionTextEmbedding('answerdotai/answerai-colbert-small-v1'))
-    return STATE['models']
-
-def pick_line(q, invoices):
-    toks = [t for t in ''.join(c if c.isalnum() else ' ' for c in q.lower()).split() if len(t) > 2]
-    best, score = None, 0
-    for i in invoices or []:
-        line = f"{i.get('invoice_no','')} {i.get('vendor','')} {i.get('items','')} {i.get('status','')}".lower()
-        s = sum(1 for t in toks if t in line)
-        if s > score: best, score = i, s
-    return f"{best['invoice_no']} · {best.get('items') or best.get('vendor')}" if best else None
-
-def handle_search(qs):
-    from qdrant_edge import QueryRequest, Prefetch
-    t = time.time(); sh = STATE['shard']; q = qs['q']
-    dense, sparse, late = models()
-    dv = next(iter(dense.embed([q]))).tolist(); sv = next(iter(sparse.embed([q]))); lv = next(iter(late.embed([q]))).tolist()
-    f = {'must': [{'key': 'manager_id', 'match': {'value': qs['manager']}}, {'is_empty': {'key': 'deleted_at'}}]}
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    req = QueryRequest(limit=5, with_payload=['customer_id', 'invoices'], filter=f,
-        prefetches=[Prefetch(limit=20, filter=f, prefetches=[
-            Prefetch(query={'nearest': {'indices': sv.indices.tolist(), 'values': sv.values.tolist()}}, using='bm25', limit=20, filter=f),
-            Prefetch(query={'nearest': lv}, using='digest', limit=20, filter=f),
-            Prefetch(query={'nearest': dv}, using='summary', limit=20, filter=f)], query={'fusion': 'rrf'})],
-        query={'formula': {'sum': ['$score', {'mult': [0.1, {'exp_decay': {'x': {'datetime_key': 'last_invoice_at'}, 'target': {'datetime': now}, 'scale': 2592000, 'midpoint': 0.5}}]}]}})
-    pts = sh.query(req)
-    return {'results': [dict(customer_id=p.payload['customer_id'], score=round(p.score, 4), matched_line=pick_line(q, p.payload.get('invoices'))) for p in pts],
-            'latency_ms': int((time.time() - t) * 1000), 'source': 'local'}
-
-class H(BaseHTTPRequestHandler):
-    def do_GET(self):
-        u = urllib.parse.urlparse(self.path); qs = dict(urllib.parse.parse_qsl(u.query))
-        try:
-            if STATE['shard'] is None: raise RuntimeError('no shard yet: ' + STATE['last_error'])
-            body = handle_list(qs) if u.path == '/customers' else handle_search(qs) if u.path == '/search' else None
-            code = 200 if body else 404
-        except Exception as e:
-            body, code = {'error': str(e)}, 500
-        out = json.dumps(body or {'error': 'not found'}).encode()
-        self.send_response(code); self.send_header('content-type', 'application/json'); self.send_header('access-control-allow-origin', '*')
-        self.send_header('content-length', str(len(out))); self.end_headers(); self.wfile.write(out)
-    def log_message(self, *a): pass
-
-def loop():
-    while True:
-        sync(); time.sleep(10)
-
-if __name__ == '__main__':
-    threading.Thread(target=loop, daemon=True).start()
-    print(f'edge sidecar for {MANAGER} on http://localhost:8787', file=sys.stderr)
-    ThreadingHTTPServer(('127.0.0.1', 8787), H).serve_forever()
-```
-
-The exact constructor names (`ScrollRequest`, `QueryRequest`, `Prefetch`, the `query` dict shapes) come from the installed `qdrant_edge` stubs; if a name differs, read `.venv/lib/python*/site-packages/qdrant_edge/*.pyi` and adjust the three call sites. The tests use a fake shard and do not depend on those names. If `ScrollRequest.filter` is not a plain dict in the installed version, have `handle_list` store the dict on `STATE['last_filter']` before calling `scroll`, and read that in the fake.
-
-- [ ] **Step 4: Run tests**
-
-Run: `cd edge && .venv/bin/python -m unittest test_sidecar.py`
-Expected: `OK` (2 tests).
-
-- [ ] **Step 5: Run it for real**
-
-Run: `set -a; . .env; set +a; edge/.venv/bin/python edge/sidecar.py` then in another shell:
-`curl -s 'localhost:8787/customers?manager=m_anna' | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d["cards"]), d["latency_ms"], d["source"])'`
-Expected: `3 <under 10> local`. Then `curl -s 'localhost:8787/search?manager=m_anna&q=servers'` returns acme first with a matched line. First search is slow (model download); the second is under 100 ms.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add edge/sidecar.py edge/test_sidecar.py
-git commit -m "feat(edge): local Edge replica sidecar serving list and search offline
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
----
-
-### Task 3: Dashboard Source Switch
-
-**Files:**
-- Modify: `dashboard/app.js`, `dashboard/app.test.js`, `dashboard/index.html`
-
-- [ ] **Step 1: Add the test to `dashboard/app.test.js`**
-
-```js
-const { nextSource } = require('./app');
-test('falls to local only after three failures, back to cloud on first success', () => {
-  assert.equal(nextSource('cloud', 1, true), 'cloud');
-  assert.equal(nextSource('cloud', 3, true), 'local');
-  assert.equal(nextSource('local', 0, true), 'cloud');
-  assert.equal(nextSource('cloud', 5, false), 'cloud');  // no local available
-});
-```
-
-- [ ] **Step 2: Implement in `dashboard/app.js`**
-
-```js
-function nextSource(current, failures, localAvailable) {
-  if (!localAvailable) return 'cloud';
-  if (current === 'cloud' && failures >= 3) return 'local';
-  if (current === 'local' && failures === 0) return 'cloud';
-  return current;
-}
-```
-and add `nextSource` to `module.exports`.
-
-- [ ] **Step 3: Wire `index.html`**
-
-Add to the header: `<span id="src" class="tab">Cloud</span>`. In the script: `let source = 'cloud'; const LOCAL = 'http://localhost:8787';` Change `api()` to use `source === 'local' ? LOCAL + '/' + path : CONFIG.base + '/webhook/' + path`. In `poll()`, on success set `fails = 0; source = nextSource(source, 0, true)`; on failure `fails++; source = nextSource(source, fails, true)`; show `#banner` with text `offline · local replica` when `source === 'local'`. Badge text appends `· ${d.source || 'cloud'}`. Clicking `#src` toggles source manually. Disable the Remove and Restore buttons when `source === 'local'` and set their title to "writes need the cloud".
-
-- [ ] **Step 4: Test**
-
-Run: `node --test dashboard/` → `# fail 0`. Manual: sidecar running, dashboard open, switch wifi off. Within 6 s the banner shows and the badge reads `<10> ms qdrant · … · local`. Type `servers`: acme rings. Click Remove: nothing happens, tooltip explains. Wifi on: within 6 s badge returns to cloud. Submit a PDF from the phone while on wifi, switch wifi off before it finishes: the local card stays at its last synced stage until wifi returns, then sharpens.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add dashboard
-git commit -m "feat(dashboard): cloud/local source switch with offline fallback
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
----
-
-### Task 4: Booth Additions
-
-- [ ] **Step 1:** Add the 1:00 closer to `booth/script.md` (spec section 10, Edge line) and the "Qdrant Edge is in beta" line to `booth/cards.md`. Add to `README.md` under Known Limits: "Local search computes BM25 idf over the local shard, so scores differ from the cloud; ordering can differ on ties."
-- [ ] **Step 2:** Add to `booth/rehearsal.md` warm-up: sidecar started 5 minutes before, first search done once to warm the models, wifi toggle tested.
-- [ ] **Step 3:** Commit.
-
-```bash
-git add booth README.md
-git commit -m "docs: Edge closer in the script, beta caveat on the card
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
+## Task 1: Day-1 Edge Gates
+
+**Files:** Modify `qdrant/smoke.sh` to dispatch `--edge`; create `edge/requirements.txt`, `edge/gate.py`, and `edge/gate-results.md`. Create a unique `EDGE_GATE_COLLECTION` using the core collection's schema and shard-key configuration, seed both managers, and restrict every gate mutation and cleanup to that collection. The normal core smoke collection need not remain available. Refuse `EDGE_GATE_COLLECTION=customers`; never mutate the finished corpus for a gate.
+
+- [ ] **Step 1: Install and record the tested environment.** Run from the repository root; resolve paths from script locations so invocation cwd is irrelevant. Create `edge/.venv`, install dependencies, record Python/platform, package versions, server version, and cloud model descriptors; then pin successful versions. Inspect installed stubs and official examples for request constructors. Record verified signatures in `gate-results.md` without keys.
+- [ ] **Step 2: Resolve the shard.** Query `/collections/{collection}/cluster`; group both local and remote shard metadata by distinct shard ID for the manager key (replicas are not distinct shards). Require exactly one ID and prove the snapshot endpoint routes to its hosting peer through the cluster URL. Do not assume shard 0 or treat absence from one peer's `local_shards` as proof custom sharding failed. Fail explicitly if peer routing is unavailable.
+- [ ] **Step 3: Full snapshot gate.** Stream the full endpoint with HTTP status checks and timeouts into a unique temporary directory outside live data. Unpack/load; assert expected manager point IDs and no other manager payloads, named vectors, multivector configuration, sparse IDF modifier, and required payload indexes. Close and reopen from disk without network; inspect actual points, not just `points_count`.
+- [ ] **Step 4: Partial snapshot gate.** Read the restored shard's manifest, upsert a new point and change an existing payload on Cloud, request a partial snapshot with that manifest, then apply to a separate candidate copy. Assert both changes locally. Repeat for soft delete, restore, and hard purge, each using the last successfully published manifest. Verify the unchanged other-manager shard remains absent. A successful full restore does not satisfy this gate.
+- [ ] **Step 5: Read/query gate.** Implement the actual typed binding adapter and exercise it on the restored shard: live/removed scroll, datetime descending order, nested overdue amount condition on the same invoice, dense/BM25/ColBERT prefetches with named vectors, RRF, and the exact core decay formula. Use `query_embed` for local queries and confirm dimensions, sparse token compatibility, finite values, and known seeded matches. Compare same-input cloud and local result shapes and matched-line behavior; do not require equal scores. If formula or any required operation is unsupported, cut this stretch instead of silently simplifying the query.
+- [ ] **Step 6: Offline gate.** Download all model/tokenizer assets to `edge/models` while online; instantiate all three models, embed a query, and run local list/filter/search. Stop the process, block outbound access, restart with the saved generation and local-only model loading, and repeat before any sync attempt succeeds. Missing cache must produce an explicit not-ready response, not a request-time download.
+- [ ] **Step 7: Run `qdrant/smoke.sh --edge`.** Report each gate separately in `gate-results.md`, with commands, actual versions, measured latencies, and pass/fail evidence. Full, partial, query, and offline gates must all pass on day 1. Until then, status is **NOT RUN**, not “Edge gate ok.” Clean up only isolated fixture data.
+
+## Task 2: Durable, Read-Only Sidecar
+
+**Files:** Create `edge/sidecar.py`, `edge/test_sidecar.py`, `edge/test_edge_integration.py`; add data/model-cache ignore rules.
+
+**Public read contract:** `GET /customers?manager=m_anna[&overdue_gte=N]` returns core Task 8 `{cards, removed, latency_ms}`; `GET /search?manager=m_anna&q=...` returns `{results: [{customer_id, score, matched_line}], latency_ms}`. Add `source: "local"` and `last_sync` (UTC timestamp of successful publication). Copy Task 4 card mapping and matched-line semantics exactly, including normalized `latest`, zero values, pending narrative behavior, removed timestamps, and purge-at calculation. Keep Task 8 limits/order and active-vs-removed filter separation; an empty result is a successful result.
+
+`GET /health` reports `{manager, read_ready, search_ready, last_sync, last_error}` without credentials. Health is ready for dashboard fallback only when the manager matches and both reads and warmed search are available. Use 400 for invalid/missing parameters, 403 for a different manager, 404 for unknown routes, 405 for writes, and 503 when the requested service is not ready. Require a finite nonnegative `overdue_gte` and nonempty bounded search text. Specify `latency_ms` as local Qdrant execution time; measure embedding/HTTP elapsed separately in gate evidence rather than mislabeling them.
+
+- [ ] **Step 1: Define seams and meaningful unit tests.** Separate snapshot transport, typed request adapter, generation store, clock, and embedders. Unit fakes implement those domain seams, not guessed binding dictionaries. Importing the sidecar has no environment-dependent network/model startup. Test tenant rejection before any shard call; live vs removed filters including missing/null `deleted_at`; numeric zero threshold; nested false positives from different invoice elements; descending order; exact card fixtures; restored and purged points; query-specific embedding use; empty results; unknown paths; and missing-model readiness.
+- [ ] **Step 2: Persist generations safely.** Store `edge/data/{manager}/generations/{unique-id}` plus an atomically replaced `current.json` containing generation ID, collection/shard identity, schema/model metadata, and `last_sync`. No fixed `.new` path may be reused or deleted while it is active. Temp archives/extraction directories live outside every loaded generation.
+- [ ] **Step 3: Prepare candidate updates.** Serialize syncs. For an initial restore/full recovery, unpack into a new generation. For partial sync, capture the active manifest and flush/copy the immutable active files under the same read lock used by handlers; use a deep copy (never hard links), load that candidate, and call `update_from_snapshot` on it. The deployed binding's consistent-copy behavior must be proven in integration; if it cannot be established, cut the stretch. Download, copy, apply, and validation failures close/delete only the candidate, leave the active shard/manifest and timestamp intact, and record `last_error`. A rejected partial can trigger an explicit full recovery into another fresh generation; it never modifies the live directory.
+- [ ] **Step 4: Publish atomically.** Validate candidate schema, tenant contents, and successful structural read/search queries before publication, allowing zero points after legitimate purges. Fixed fixture IDs and expected matches belong only in the isolated gate/integration corpus, not runtime publication validation. Under one read/publication lock, durably replace `current.json`, install the corresponding shard reference and timestamp, and retire the prior handle. Handlers hold that lock for the entire shard operation, including both list scrolls, so no request uses a closed handle or mixes generations. Close retired handles only after readers release them; retain one last-good generation on disk. Garbage collection excludes current, retained rollback, and in-flight directories. A crash before manifest replacement restarts from the old generation; a crash after replacement loads the validated new one. Disk errors leave the previous published generation available.
+- [ ] **Step 5: Start offline-first.** Load and validate `current.json` immediately, with no cloud call required. Load all cached embedders in local-only mode and perform warm query/search before `search_ready` is true. Start HTTP independently of background sync; cold start without data returns 503 and an actionable health status. Missing cloud configuration prevents sync but need not prevent serving a valid saved replica. A bounded sync loop retries while preserving last-good reads and staleness metadata. Serialize model inference if thread safety is not proven.
+- [ ] **Step 6: HTTP/browser access.** Serve only loopback, return JSON with correct status/content headers, and configure the exact dashboard origin. Verify preflight and Chrome's current localhost/private-network restrictions with the actual booth hosting origin; a curl success is insufficient. If needed, use the approved local static hosting origin and repeat the browser gate. Do not expose secrets or rely on wildcard CORS to solve browser connection policy.
+- [ ] **Step 7: Run tests.** From repo root: `edge/.venv/bin/python -m unittest discover -s edge -p 'test_*.py'`. Integration tests are explicitly opt-in and require a disposable fixture cluster/collection. Use the real pinned binding to restore/update/load/query. Inject failures after candidate files have been changed, during manifest persistence, and across three successive successful syncs; assert active data/directories survive. Test a concurrent read held across publication, process restart before/after publication, offline restart with saved assets, and upsert/soft-delete/restore/purge convergence. A download exception alone does not prove failed-apply safety. Record which tests ran; skipped live tests are not passes.
+- [ ] **Step 8: Rehearse against core corpus.** After core Task 12, seed a fresh generation, compare local/cloud cards and filter IDs, and run known searches. Measure warm list/search and restart readiness on the actual laptop; treat <10 ms list and <100 ms warm search as targets requiring measurement, not guaranteed acceptance strings. Show last-sync age while disconnected.
+
+## Task 3: Dashboard Source Switch and Recovery
+
+**Files:** Modify core Task 9 `dashboard/app.js`, `dashboard/app.test.js`, and `dashboard/index.html`; extend the same controller instead of adding a second inline API/poll loop.
+
+- [ ] **Step 1: Define source state.** Track user mode (`auto`, `cloud`, `local`) separately from active read source, cloud failure streak, local readiness/manager, and request generation. In auto mode, switch after three consecutive failed bounded cloud list polls only when matching Local is healthy; a validated cloud response resets cloud failures. Successful Local requests never imply Cloud is healthy. While serving Local, probe Cloud on a bounded nonoverlapping schedule; return automatically only after a successful validated Cloud list response. Manual Local stays Local until changed by the user. An unavailable Local keeps the last rendered grid and displays the failure; it does not invent an empty response.
+- [ ] **Step 2: Integrate the core request lifecycle.** Use its HTTP-status/schema validation, timeout/AbortController, debounce, and stale-response checks. Source changes increment the generation and abort/invalidate list/search requests and outstanding probes. Preserve manager, overdue filter, and query, then fetch a matching list and re-run nonempty search on the selected source. Reject late results captured with a different manager/source/filter/query generation. Probe results are health evidence, not render instructions for an obsolete context.
+- [ ] **Step 3: Availability and writes.** Fetch `/health` to establish manager-scoped readiness; refresh after Local failures. Switching to manager Ben invalidates Anna's Local availability and reads. All mutation URLs remain Cloud URLs regardless of read source, and Local controls are disabled and guarded in the event handler. Display Cloud/Local, staleness, offline banner, and unavailable status accurately. No fixed six-second promise: fallback depends on poll cadence, request deadlines, and probes.
+- [ ] **Step 4: Test the reducer and integration.** `node --test dashboard/*.test.js`: one/two cloud failures do not switch; third does only with ready matching Local; Local success leaves source Local and failures unchanged; failed cloud probes do not recover; validated cloud success recovers auto but not manual Local; malformed/non-2xx cloud responses fail; no overlapping polls; late Cloud/Local results cannot repaint after switching; manager mismatch blocks Local; active query/filter survive switching; empty results clear matches; Local click/programmatic writes stay disabled. Simulate delayed responses and source changes using controllable promises, not just `nextSource` assertions.
+- [ ] **Step 5: Browser gate.** On the actual origin with a ready saved replica, toggle wifi off and verify list, nested filter, and search plus write guards and staleness. Toggle wifi on and verify validated probe recovery and a new invoice reaching Local after successful partial publication. Restart sidecar and browser while offline. Record measured recovery times; cut the closer if this gate fails.
+
+## Task 4: Booth Additions and Exit Criteria
+
+- [ ] Add the Edge closer to `booth/script.md` only after all gates and rehearsal pass. Add beta/write/staleness limits to cards and README. Explain that shard-local sparse IDF statistics may change scores and rankings relative to Cloud; do not restrict the caveat to ties or promise identical search ranking.
+- [ ] Add rehearsal warm-up: online cache preparation once, cached-model load and warm search at startup, successful partial sync, health/last-sync check, wifi-off query and restart, and wifi-on recovery. A single warm search in an already-running online process does not prove offline restart.
+- [ ] Keep Edge disabled if cut. Preserve core dashboard behavior and remove the closer/source controls from shipped booth material. Gate evidence states the failed capability plainly.
+- [ ] Before implementation commits, inspect diff, run applicable checks, and commit only the intended files under the repository's normal attribution policy. This plan revision itself does not perform application changes, installs, live mutations, or commits.

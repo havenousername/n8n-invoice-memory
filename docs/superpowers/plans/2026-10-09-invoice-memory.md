@@ -1,6 +1,6 @@
 # Invoice Memory Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For implementers:** Execute this plan task by task using available tools and skills. Steps use checkbox (`- [ ]`) syntax for tracking. This plan does not require an unavailable execution skill.
 
 **Goal:** Build the booth demo: invoice PDFs become one progressively sharpening Qdrant point per customer, shown on a live manager dashboard, driven by n8n Cloud workflows.
 
@@ -15,9 +15,9 @@ Numbering note: the spec's "04 Dashboard API" is split here into `04 Dashboard r
 ## Global Constraints
 
 - n8n Cloud. No Variables, no community nodes, no `require` in Code nodes, no filesystem, no hardcoded credential IDs, webhook IDs, or cluster URLs in exported JSON.
-- Every workflow starts with an Edit Fields node named `Config` holding `QDRANT_URL`, `COLLECTION` (`customers`), `OPENROUTER_MODEL`, `PDF_ENGINE` (`native`), `WORKERS`, `MANAGERS`, `SAMPLES_BASE_URL`.
+- Every trigger path immediately enters an Edit Fields node named `Config` (or `Config (search)`), preserving incoming JSON and declaring the values that path uses. Shared values are `QDRANT_URL`, `COLLECTION` (`customers`), `OPENROUTER_MODEL`, `PDF_ENGINE` (`native`), `WORKERS`, `MANAGERS`, and `SAMPLES_BASE_URL`.
 - Credentials: `Qdrant api-key` (Header Auth, header `api-key`), `OpenRouter bearer` (Header Auth, header `Authorization`, value `Bearer <key>`).
-- Qdrant collection `customers`: named vectors `summary` (384, Cosine), `digest` (96, Cosine, multivector max_sim), sparse `bm25` (idf); `sharding_method: custom`; shard keys `m_anna`, `m_ben`. Every request body carries `shard_key`.
+- Qdrant collection `customers`: named vectors `summary` (384, Cosine), `digest` (96, Cosine, multivector max_sim), sparse `bm25` (idf); `sharding_method: custom`; shard keys `m_anna`, `m_ben`. Point reads and writes carry `shard_key`; collection administration does not. Every tenant lookup additionally filters `manager_id` and `customer_id` as appropriate.
 - Inference models, exact strings: `sentence-transformers/all-minilm-l6-v2`, `answerdotai/answerai-colbert-small-v1`, `qdrant/bm25`.
 - Point ID: SHA-256 of `<manager_id>/<customer_id>` formatted as a UUID (first 32 hex, version nibble `4`, variant nibble `8`). Deterministic; this replaces the spec's uuid5 because n8n Code nodes have no crypto; the Crypto node does the hash.
 - Node names are sentences. Target 12 nodes per canvas, hard cap 15. Four sticky notes max.
@@ -25,6 +25,16 @@ Numbering note: the spec's "04 Dashboard API" is split here into `04 Dashboard r
 - Latency targets: list under 300 ms, search under 500 ms, measured in n8n around the Qdrant call and returned as `latency_ms`.
 - Writing in README, cards, script: American English, Oxford comma, no em dashes, Title Case headings.
 - Commit after every task with the attribution line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+
+### Execution Gates and Data Ownership
+
+- This document is an implementation plan. External requests below are future acceptance checks, not evidence that this account has passed them. Record actual cluster version, available inference model IDs, n8n version, and test results before building the canvases.
+- Data Tables manage their own numeric `id`, `createdAt`, and `updatedAt`. Use a custom string `invoice_id` for the invoice business key everywhere; never add or overwrite built-in `id`. Match invoice writes on `invoice_id`, `manager_id`, and `customer_id`; match customer writes on both tenant and slug. Bind table selections and Execute Sub-workflow references again after import, along with credentials and Config. Import seven workflows in dependency order (03, 02b, 02, 01, 04, 05, 06); activate trigger workflows only after binding.
+- HTTP, Data Table, and Execute Sub-workflow outputs replace incoming JSON. Downstream fields must reference the named source node explicitly. Rebuild returns Qdrant's response, not the caller's PDF. [n8n documents that a sub-workflow returns its last node's output](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.executeworkflow/).
+- `02 Process` downloads the validated public sample URL itself. No binary crosses a sub-workflow call. Within Process, encode the downloaded PDF with [the supported binary buffer helper](https://docs.n8n.io/build/code-in-n8n/cookbook/code-node/get-the-binary-data-buffer.md), preserve its binary explicitly in that Code node, then extract text. A scanned but valid PDF with empty text proceeds normally; corrupt PDF/download errors are separate failures that must be recorded as stage -1 and rebuilt.
+- Manager tabs and Form workers are synthetic selectors, not authentication. Validate manager against `MANAGERS`, sample against the committed manifest allowlist, worker against `WORKERS`, and customer against the tenant's existing rows. Reject invalid input with JSON and 400, missing customers with 404. Reject nonfinite/negative overdue thresholds and empty/overlong search strings. No public sample URL may be supplied directly by the visitor.
+- No distributed lock is introduced. Submit one sample at a time and await completion during booth operation. Overlapping runs can leave a stale final Qdrant write; after all writers finish, manually run Rebuild and regenerate the narrative from current rows. Do not claim automatic convergence without a later rebuild. Run purge only while ingest, processing, and restore are stopped.
+- Keep every canvas within 15 actual nodes, counting Config, validation, branch, merge, loop, and error nodes. If gates require additional nodes, extract a named helper sub-workflow and include its import/binding in README; never hide multiple nodes in one table row.
 
 ## Review Focus
 
@@ -76,9 +86,9 @@ set -euo pipefail
 q() {  # q METHOD /path [json]
   local m=$1 p=$2 body=${3:-}
   if [ -n "$body" ]; then
-    curl -sS -X "$m" "$QDRANT_URL$p" -H "api-key: $QDRANT_API_KEY" -H 'content-type: application/json' -d "$body"
+    curl --fail-with-body -sS -X "$m" "$QDRANT_URL$p" -H "api-key: $QDRANT_API_KEY" -H 'content-type: application/json' -d "$body"
   else
-    curl -sS -X "$m" "$QDRANT_URL$p" -H "api-key: $QDRANT_API_KEY"
+    curl --fail-with-body -sS -X "$m" "$QDRANT_URL$p" -H "api-key: $QDRANT_API_KEY"
   fi
   echo
 }
@@ -94,7 +104,13 @@ cd "$(dirname "$0")"; set -a; [ -f ../.env ] && . ../.env; set +a
 . ./lib.sh
 C=/collections/customers
 
-if q GET $C | grep -q '"status":"ok"'; then echo "collection exists"; else
+SETUP_TMP=$(mktemp -d)
+trap 'rm -rf "$SETUP_TMP"' EXIT
+HTTP_CODE=$(curl -sS -o "$SETUP_TMP/collection.json" -w '%{http_code}' "$QDRANT_URL$C" -H "api-key: $QDRANT_API_KEY")
+if [ "$HTTP_CODE" = 200 ]; then
+  ok < "$SETUP_TMP/collection.json"
+  echo "collection exists"
+elif [ "$HTTP_CODE" = 404 ]; then
 q PUT $C '{
   "vectors": {
     "summary": {"size": 384, "distance": "Cosine"},
@@ -102,11 +118,23 @@ q PUT $C '{
   },
   "sparse_vectors": {"bm25": {"modifier": "idf"}},
   "sharding_method": "custom"
-}' | ok; fi
+}' | ok
+else
+  cat "$SETUP_TMP/collection.json" >&2
+  exit 1
+fi
 
-for k in m_anna m_ben; do q PUT $C/shards "{\"shard_key\": \"$k\"}" >/dev/null || true; done
+EXISTING_KEYS=$(q GET "$C/shards")
+printf '%s' "$EXISTING_KEYS" | ok
+for k in m_anna m_ben; do
+  if printf '%s' "$EXISTING_KEYS" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if any(s["key"]==sys.argv[1] for s in d["result"]["shard_keys"]) else 1)' "$k"; then
+    echo "shard key exists: $k"
+  else
+    q PUT "$C/shards" "{\"shard_key\": \"$k\"}" | ok
+  fi
+done
 
-idx() { q PUT "$C/index?wait=true" "{\"field_name\": \"$1\", \"field_schema\": $2}" >/dev/null || true; }
+idx() { q PUT "$C/index?wait=true" "{\"field_name\": \"$1\", \"field_schema\": $2}" | ok; }
 idx manager_id        '{"type":"keyword","is_tenant":true}'
 idx worker_id         '{"type":"keyword"}'
 idx customer_id       '{"type":"keyword"}'
@@ -123,6 +151,8 @@ q GET $C | python3 -c 'import sys,json; d=json.load(sys.stdin)["result"]; print(
 
 Run: `chmod +x qdrant/*.sh && qdrant/setup.sh && qdrant/setup.sh`
 Expected: first run prints `indexes: [...9 names...]` and `sharding: custom`; second run prints `collection exists` then the same two lines. If the cluster rejects `sharding_method: custom`, delete that line and both `shards` calls, remove `shard_key` from every later body, and note it in the README; the Edge plan is then cut.
+
+The shard listing above follows [Qdrant's list-shard-keys response](https://api.qdrant.tech/api-reference/distributed/list-shard-keys). Confirm this API on the actual cluster version. Setup must also assert existing vector dimensions, distances, multivector comparator, sparse modifier, shard mode, and index schemas; a incompatible existing collection fails with an actionable message rather than silently passing. The payload-only fallback requires consistent removal of shard_key in scripts and workflows and all tenant payload filters retained; unsupported permissions or authentication failures are not evidence that sharding is unavailable.
 
 - [ ] **Step 5: Commit**
 
@@ -153,7 +183,10 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 set -euo pipefail
 cd "$(dirname "$0")"; set -a; [ -f ../.env ] && . ../.env; set +a
 . ./lib.sh
-C=/collections/customers
+C=/collections/invoice_memory_smoke_$(date -u +%Y%m%d%H%M%S)_$$
+# Create this disposable collection with Task 1's vectors, shards, and indexes.
+# Guard cleanup by exact generated collection name, never use /collections/customers.
+trap 'q DELETE "$C" | ok' EXIT
 ID=11111111-1111-4111-8111-111111111111
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -224,6 +257,8 @@ echo "SMOKE PASSED"
 - [ ] **Step 2: Run it**
 
 Run: `chmod +x qdrant/smoke.sh && qdrant/smoke.sh`
+
+Before the first point write, actually create the disposable collection using the shared setup helper, passing its generated collection name, and verify that no production customer exists in it. Parameterize Task 1's setup function instead of duplicating schema. The inline comments above are implementation requirements, not executable collection creation. Use datetime ranges as verified by the deployed schema, and scope smoke purge to manager_id and the reserved smoke ID. Add a two-invoice negative nested-filter fixture: one overdue small invoice plus one paid large invoice must not match overdue >= 10000. Add read isolation for same slug under the other manager and verify upsert replacement removes deleted_at on restore.
 Expected: five `ok` lines then `SMOKE PASSED`. Failure modes and what to change: step 1 rejects an inference model → check the cluster's Inference tab, swap the model string everywhere; step 3 rejects `nearest` inside `prefetch` → move the inference object to `"query": {"text": ..., "model": ...}` per the error message and update the spec's section 11; step 2 fails on `nested` → check that the `invoices[].status` index exists (`setup.sh` output).
 
 - [ ] **Step 3: Commit**
@@ -270,24 +305,24 @@ print(json.dumps({
     {"type": "file", "file": {"filename": "invoice.pdf", "file_data": "data:application/pdf;base64," + b64}}]}
  ]}))
 PY
-START=$(date +%s%N)
-curl -sS https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'content-type: application/json' -d @/tmp/or_body.json > /tmp/or_resp.json
-END=$(date +%s%N)
+START=$(python3 -c 'import time; print(time.monotonic_ns())')
+curl --fail-with-body -sS --max-time 35 https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'content-type: application/json' -d @/tmp/or_body.json > /tmp/or_resp.json
+END=$(python3 -c 'import time; print(time.monotonic_ns())')
 python3 - <<'PY'
 import json
 r=json.load(open('/tmp/or_resp.json'))
 assert 'choices' in r, r
 c=json.loads(r['choices'][0]['message']['content'])
-for k in ['invoice_no','date','due_date','amount','vendor','customer_name','status']: assert k in c, (k, c)
+for k in ['invoice_no','date','due_date','amount','vendor','customer_name','status','line_items_summary']: assert k in c, (k, c)
 print("fields:", c)
 PY
 echo "latency_ms: $(( (END-START)/1000000 ))"
 ```
 
-- [ ] **Step 2: Run it with any PDF** (before Task 4 exists, use any invoice-like PDF on disk; after Task 4, use `samples/acme-001.pdf`)
+- [ ] **Step 2: Run with synthetic fixtures only** (after Task 5 produces the samples; do not send real local invoices)
 
 Run: `chmod +x qdrant/openrouter_check.sh && qdrant/openrouter_check.sh samples/acme-001.pdf`
-Expected: `fields: {...}` with all seven keys and `latency_ms` under 30000. If the model rejects `file` input, open `https://openrouter.ai/models`, pick the cheapest mid-tier model that lists PDF input and `response_format`, set it in `.env`, rerun. If none works, set `PDF_ENGINE=pdf-text` in `.env` (text extraction instead of vision) and strike the word "vision" from `booth/script.md` in Task 13.
+Expected: `fields: {...}` with all eight requested keys and `latency_ms` under 30000. If the model rejects `file` input, open `https://openrouter.ai/models`, pick the cheapest mid-tier model that lists PDF input and `response_format`, set it in `.env`, rerun. If none works, set `PDF_ENGINE=pdf-text` in `.env` (text extraction instead of vision) and strike the word "vision" from `booth/script.md` in Task 13.
 
 - [ ] **Step 3: Commit**
 
@@ -304,7 +339,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `workflows/code/ids.js`, `coarse.js`, `validate.js`, `view.js`, `cards.js`, `match.js`, and one `*.test.js` beside each
-- Test: `node --test workflows/code/`
+- Test: `node --test workflows/code/*.test.js`
 
 **Interfaces:**
 - Produces, as CommonJS exports (the n8n Code nodes paste the function body and call it; see each later task):
@@ -373,14 +408,14 @@ const test = require('node:test'); const assert = require('node:assert');
 const { computeView } = require('./view');
 const NOW = '2026-10-09T10:00:00Z';
 const cust = { customer_id: 'acme', worker_id: 'w_tom', manager_id: 'm_anna', name: 'Acme GmbH', deleted_at: '', narrative: '', narrative_at: '' };
-const row = (o) => ({ id: 'inv_1', stage: 1, regex_fields: '{}', llm_fields: '{}', error: '', text: 'some text', received_at: '2026-10-08T09:00:00Z', ...o });
+const row = (o) => ({ invoice_id: 'inv_1', stage: 1, regex_fields: '{}', llm_fields: '{}', error: '', text: 'some text', received_at: '2026-10-08T09:00:00Z', ...o });
 test('coarse row uses regex fields; sharp row uses llm fields', () => {
-  const a = row({ id: 'a', stage: 1, regex_fields: JSON.stringify({ invoice_no: 'INV-1', amount: 12.3, status: 'open' }) });
-  const b = row({ id: 'b', stage: 2, received_at: '2026-10-09T09:00:00Z', regex_fields: JSON.stringify({ amount: 1 }), llm_fields: JSON.stringify({ invoice_no: 'INV-2', amount: 12300, status: 'overdue', line_items_summary: 'servers' }) });
+  const a = row({ invoice_id: 'a', stage: 1, regex_fields: JSON.stringify({ invoice_no: 'INV-1', amount: 12.3, status: 'open' }) });
+  const b = row({ invoice_id: 'b', stage: 2, received_at: '2026-10-09T09:00:00Z', regex_fields: JSON.stringify({ amount: 1 }), llm_fields: JSON.stringify({ invoice_no: 'INV-2', amount: 12300, status: 'overdue', line_items_summary: 'servers' }) });
   const { payload, texts } = computeView(cust, [a, b], NOW);
   assert.equal(payload.stage, 1); assert.equal(payload.pending_count, 1); assert.equal(payload.invoice_count, 2);
   assert.equal(payload.overdue_count, 1); assert.equal(payload.overdue_amount, 12300); assert.equal(payload.open_amount, 12312.3);
-  assert.deepEqual(payload.latest, { invoice_no: 'INV-2', amount: 12300, stage: 2 });
+  assert.deepEqual(payload.latest, { id: 'b', invoice_no: 'INV-2', amount: 12300, stage: 2 });
   assert.equal(payload.last_invoice_at, '2026-10-09T09:00:00Z');
   assert.equal(payload.summary_stage, 1); assert.ok(!('deleted_at' in payload));
   assert.match(texts.digest, /INV-2 \| \? \| 12300\.00 EUR \| due \? \| overdue \| servers/);
@@ -397,10 +432,14 @@ test('error row counts as coarse, not pending', () => {
 });
 test('fresh narrative is used, stale narrative is not', () => {
   const r = row({ stage: 2, llm_fields: JSON.stringify({ amount: 5, status: 'paid' }) });
-  const fresh = computeView({ ...cust, narrative: 'All paid.', narrative_at: '2026-10-09T09:30:00Z' }, [r], NOW).payload;
+  const revision = computeView(cust, [r], NOW).payload.source_revision;
+  const fresh = computeView({ ...cust, narrative: 'All paid.', narrative_revision: revision, narrative_at: '2026-10-09T09:30:00Z' }, [r], NOW).payload;
   assert.equal(fresh.summary_stage, 3); assert.equal(fresh.summary_text, 'All paid.');
   const stale = computeView({ ...cust, narrative: 'Old.', narrative_at: '2026-10-01T00:00:00Z' }, [r], NOW).payload;
   assert.equal(stale.summary_stage, 1);
+  const late = { ...cust, narrative: 'All paid.', narrative_revision: revision, narrative_at: '2026-10-10T12:00:00Z' };
+  assert.equal(computeView(late, [r, row({invoice_id:'new',stage:0})], NOW).payload.summary_stage, 1);
+  assert.equal(computeView(late, [{...r,llm_fields:JSON.stringify({amount:7,status:'open'})}], NOW).payload.summary_stage, 1);
 });
 test('deleted_at is carried through', () => {
   assert.equal(computeView({ ...cust, deleted_at: '2026-10-05T00:00:00Z' }, [row({})], NOW).payload.deleted_at, '2026-10-05T00:00:00Z');
@@ -432,7 +471,7 @@ test('no overlap returns null', () => assert.equal(pickMatchedLine('zebra', inv)
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `node --test workflows/code/`
+Run: `node --test workflows/code/*.test.js`
 Expected: every file fails with `Cannot find module './ids'` (and so on).
 
 - [ ] **Step 3: Write the implementations**
@@ -500,7 +539,7 @@ function computeView(customer, invoices, nowIso) {
   const inv = invoices.map((r) => {
     const f = r.stage >= 2 ? parse(r.llm_fields) : parse(r.regex_fields);
     return {
-      id: r.id, invoice_no: f.invoice_no || null, date: f.date || null, due_date: f.due_date || null,
+      id: r.invoice_id, invoice_no: f.invoice_no || null, date: f.date || null, due_date: f.due_date || null,
       amount: Number.isFinite(f.amount) ? f.amount : null, vendor: f.vendor || null,
       status: f.status || 'open', stage: r.stage, error: r.error || '', items: f.line_items_summary || '',
       received_at: r.received_at || '',
@@ -514,7 +553,8 @@ function computeView(customer, invoices, nowIso) {
   const pending = inv.filter((i) => i.stage === 0 || i.stage === 1).length;
   const last = inv[inv.length - 1] || null;
   const mechanical = `${inv.length} invoices, ${sum(open.map((i) => i.amount)).toFixed(2)} EUR open, ${overdue.length} overdue, last ${last ? last.received_at.slice(0, 10) : 'never'}`;
-  const fresh = !!(customer.narrative && customer.narrative_at && last && customer.narrative_at >= last.received_at);
+  const revision = JSON.stringify(invoices.map(r => [r.invoice_id, r.stage, r.regex_fields || '{}', r.llm_fields || '{}', r.error || '', r.received_at || '']).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+  const fresh = stage === 2 && pending === 0 && !!customer.narrative && customer.narrative_revision === revision;
   const digest = inv.map((i) => `${i.invoice_no || '?'} | ${i.date || '?'} | ${i.amount === null ? '?' : i.amount.toFixed(2)} EUR | due ${i.due_date || '?'} | ${i.status} | ${i.items}`).join('\n');
   const payload = {
     manager_id: customer.manager_id, worker_id: customer.worker_id, customer_id: customer.customer_id,
@@ -523,7 +563,8 @@ function computeView(customer, invoices, nowIso) {
     total_amount: sum(priced.map((i) => i.amount)), open_amount: sum(open.map((i) => i.amount)),
     overdue_count: overdue.length, overdue_amount: sum(overdue.map((i) => i.amount)),
     last_invoice_at: last ? last.received_at : null,
-    latest: last ? { invoice_no: last.invoice_no, amount: last.amount, stage: last.stage } : null,
+    latest: last ? { id: last.id, invoice_no: last.invoice_no, amount: last.amount, stage: last.stage } : null,
+    source_revision: revision,
     summary_stage: fresh ? 3 : 1, summary_text: fresh ? customer.narrative : mechanical,
     summary_generated_at: fresh ? customer.narrative_at : nowIso,
     updated_at: nowIso,
@@ -582,7 +623,7 @@ module.exports = { pickMatchedLine };
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `node --test workflows/code/`
+Run: `node --test workflows/code/*.test.js`
 Expected: all tests pass, `# fail 0`.
 
 - [ ] **Step 5: Commit**
@@ -622,8 +663,8 @@ assert len(dups) == 1 and dups[0]['customer'] == 'beta'
 over = {r['customer'] for r in m if r['status'] == 'overdue' and r['expected_amount'] >= 10000}
 assert len(over) == 2, over
 for term in ['servers', 'consulting', 'licenses']:
-    hits = {r['customer'] for r in m if term in r['items']}
-    assert 1 <= len(hits) <= 2, (term, hits)
+    hits = {r['customer'] for r in m if r['worker_id'] in {'w_tom', 'w_lena'} and term in r['items']}
+    assert hits == {'servers': {'acme'}, 'consulting': {'beta'}, 'licenses': {'acme', 'gamma'}}[term], (term, hits)
 for r in m:
     html = open(os.path.join(here, 'html', r['file'].replace('.pdf', '.html'))).read()
     assert 'Total' in html and r['customer'] in r['file']
@@ -748,11 +789,11 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Create the Data Tables in the n8n project** (UI, Data tables tab)
 
-`invoices`: columns `id` string, `customer_id` string, `worker_id` string, `manager_id` string, `pdf_hash` string, `filename` string, `text` string, `stage` number, `regex_fields` string, `llm_fields` string, `error` string, `received_at` dateTime.
+`invoices`: custom columns `invoice_id` string, `customer_id` string, `worker_id` string, `manager_id` string, `pdf_hash` string, `filename` string, `text` string, `stage` number, `regex_fields` string, `llm_fields` string, `error` string, `received_at` dateTime.
 
-`customers`: columns `customer_id` string, `worker_id` string, `manager_id` string, `name` string, `deleted_at` dateTime, `narrative` string, `narrative_at` dateTime.
+`customers`: columns `customer_id` string, `worker_id` string, `manager_id` string, `name` string, `deleted_at` dateTime, `narrative` string, `narrative_at` dateTime, `narrative_revision` string.
 
-Seed two rows by hand in `customers`: (`acme`, `w_tom`, `m_anna`, `Acme GmbH`) and (`acme`, `w_jules`, `m_ben`, `Acme GmbH`). Seed one row in `invoices` for each: id `inv_seed_a` / `inv_seed_b`, stage `1`, `regex_fields` = `{"invoice_no":"INV-4711","amount":12.3,"status":"open"}`, `text` = `seed`, `received_at` = now.
+Seed two rows by hand in `customers`: (`acme`, `w_tom`, `m_anna`, `Acme GmbH`) and (`acme`, `w_jules`, `m_ben`, `Acme GmbH`). Seed one row in `invoices` for each: invoice_id `inv_seed_a` / `inv_seed_b`, stage `1`, `regex_fields` = `{"invoice_no":"INV-4711","amount":12.3,"status":"open"}`, `text` = `seed`, `received_at` = now.
 
 - [ ] **Step 2: Write `qdrant/check_point.sh`** (the test for this and later tasks)
 
@@ -787,7 +828,7 @@ Code node 6, paste the `uuidFromHex` and `computeView` function bodies from `wor
 ```js
 const cfg = $('Config').first().json;
 const customers = $('Load the customer row').all().map(i => i.json).filter(r => r.customer_id);
-const invoices = $('Load all invoice rows').all().map(i => i.json).filter(r => r.id);
+const invoices = $('Load all invoice rows').all().map(i => i.json).filter(r => r.invoice_id);
 if (!customers.length) throw new Error(`no customer row for ${cfg.manager_id}/${cfg.customer_id}`);
 const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 const { payload, texts } = computeView(customers[0], invoices, now);
@@ -839,22 +880,24 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `03 Rebuild point` (inputs `customer_id`, `manager_id`); `resolveUpload`, `coarseRead`, `validateFields` from Task 4; OpenRouter body from Task 3; `samples/manifest.json` file names.
-- Produces: a public Form URL (the QR); `02 Process` inputs `invoice_id`, `customer_id`, `manager_id`, binary `data`; `02b` inputs `customer_id`, `manager_id`.
+- Produces: a public Form URL (the QR); `02 Process` inputs `invoice_id`, `customer_id`, `manager_id`, `sample_url` (JSON only); `02b` inputs `customer_id`, `manager_id`.
 
-- [ ] **Step 1: Build `02b Write the narrative`** (sub-workflow, 8 nodes)
+- [ ] **Step 1: Build `02b Write the narrative`** (sub-workflow, 10 nodes)
 
 | # | Node | Settings |
 |---|---|---|
 | 1 | When Executed by Another Workflow | Fields: `customer_id`, `manager_id` |
 | 2 | Config | `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`. Include other input fields: on |
 | 3 | Hash the point id | Crypto SHA256 of `={{ $json.manager_id }}/{{ $json.customer_id }}` → `idhash` |
-| 4 | Read the point | Code: paste `uuidFromHex`; `return [{json:{id: uuidFromHex($json.idhash), ...$('Config').first().json}}]` then HTTP Request POST `={{ $json.QDRANT_URL }}/collections/{{ $json.COLLECTION }}/points` body `={{ JSON.stringify({shard_key: $json.manager_id, ids: [$json.id], with_payload: true}) }}` (two nodes; count them as 4 and 5) |
-| 6 | Ask for three sentences | HTTP Request POST `https://openrouter.ai/api/v1/chat/completions`, Header Auth `OpenRouter bearer`, body: see below |
-| 7 | Keep only the narrative | Code: `const c = JSON.parse($json.choices[0].message.content); if (typeof c.narrative !== 'string' || c.narrative.length < 20) throw new Error('bad narrative'); return [{json:{narrative: c.narrative.slice(0,600), at: new Date().toISOString().replace(/\.\d{3}Z$/,'Z')}}];` |
-| 8 | Save the narrative | Data Table `customers`, Update rows where `customer_id` equals and `manager_id` equals (from Config); set `narrative`, `narrative_at` |
-| 9 | Rebuild the point | Execute Sub-workflow `03 Rebuild point`, wait on, inputs `customer_id`, `manager_id` from Config |
+| 4 | Format the point id | Code: paste `uuidFromHex`; `return [{json:{id:uuidFromHex($json.idhash), ...$('Config').first().json}}];` |
+| 5 | Read the point | HTTP POST to Config Qdrant collection `/points`, body `={{ JSON.stringify({shard_key:$json.manager_id, ids:[$json.id], with_payload:true}) }}`, Header Auth Qdrant |
+| 6 | Prepare the narrative snapshot | Code: `const cfg = $('Config').first().json; const p = $json.result?.[0]?.payload; if (!p || p.manager_id !== cfg.manager_id || p.customer_id !== cfg.customer_id) throw new Error('missing tenant point'); if (p.stage !== 2 || p.pending_count !== 0) return []; return [{json:{payload:p}}];` |
+| 7 | Ask for three sentences | HTTP Request POST `https://openrouter.ai/api/v1/chat/completions`, Header Auth `OpenRouter bearer`, body: see below |
+| 8 | Keep only the narrative | Code: `const c = JSON.parse($json.choices[0].message.content); if (typeof c.narrative !== 'string' || c.narrative.length < 20) throw new Error('bad narrative'); return [{json:{narrative: c.narrative.slice(0,600), at: new Date().toISOString(), revision: $('Prepare the narrative snapshot').first().json.payload.source_revision}}];` |
+| 9 | Save the narrative | Data Table `customers`, Update rows where `customer_id` equals and `manager_id` equals (from Config); set `narrative` from `$json.narrative`, `narrative_at` from `$json.at`, `narrative_revision` from `$json.revision` |
+| 10 | Rebuild the point | Execute Sub-workflow `03 Rebuild point`, wait on, inputs `customer_id`, `manager_id` from Config |
 
-Node 6 body (JSON expression):
+Node 7 body (JSON expression):
 
 ```js
 ={{ JSON.stringify({
@@ -862,33 +905,35 @@ Node 6 body (JSON expression):
   response_format: { type: 'json_object' },
   messages: [
     { role: 'system', content: 'You write for a manager. Three plain sentences about this customer: what is open, what is overdue, what changed most recently. No bullet points. Return JSON only: {"narrative": "..."}' },
-    { role: 'user', content: 'Aggregates: ' + JSON.stringify((({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}) => ({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}))($json.result[0].payload)) + '\nInvoices:\n' + $json.result[0].payload.invoices.map(i => `${i.invoice_no} | ${i.date} | ${i.amount} EUR | due ${i.due_date} | ${i.status} | ${i.items}`).join('\n') }
+    { role: 'user', content: 'Aggregates: ' + JSON.stringify((({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}) => ({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}))($json.payload)) + '\nInvoices:\n' + $json.payload.invoices.map(i => `${i.invoice_no} | ${i.date} | ${i.amount} EUR | due ${i.due_date} | ${i.status} | ${i.items}`).join('\n') }
   ]}) }}
 ```
 
-Node 6 settings: Timeout 20000 ms, Retry on fail 1. Node 7 settings: On Error → Stop workflow (a bad narrative leaves the point at rung 2, by design).
+Node 7 settings: Timeout 20000 ms, Retry on fail 1. Node 8 settings: On Error → Stop workflow (a bad narrative leaves the point at rung 2, by design).
+
+The snapshot revision is captured before the model call and stored with its narrative. Rebuild uses it only if current rows still have the identical revision and every invoice is sharp; a completion timestamp cannot make an old snapshot fresh. Test both a newly arrived invoice and a coarse-to-sharp transition while a narrative is in flight.
 
 - [ ] **Step 2: Build `02 Process`** (sub-workflow, 15 nodes, the cap)
 
 | # | Node | Settings |
 |---|---|---|
-| 1 | When Executed by Another Workflow | Fields: `invoice_id`, `customer_id`, `manager_id`; Accept binary |
+| 1 | When Executed by Another Workflow | Fields: `invoice_id`, `customer_id`, `manager_id`, `sample_url` |
 | 2 | Config | `OPENROUTER_MODEL`, `PDF_ENGINE`. Include other input fields: on |
 | 3 | Show the point as received | Execute Sub-workflow `03 Rebuild point`, wait on, `customer_id`, `manager_id` |
-| 4 | Pull the text out of the PDF | Extract from File, operation PDF, binary property `data`. Input from node 2 (connect 2→4 as well as 2→3→4? No: connect 3→4; Extract reads binary from the item, which 03 passes through unchanged) |
-| 5 | Read the PDF as base64 | Extract from File, operation Move File to Base64 String, binary `data`, destination key `b64` |
-| 6 | Coarse read with regex | Code: paste `coarseRead`; `const text = $('Pull the text out of the PDF').first().json.text || ''; return [{json:{regex_fields: JSON.stringify(coarseRead(text)), text}}];` |
-| 7 | Update the row: stage 1 | Data Table `invoices`, Update where `id` equals `={{ $('Config').first().json.invoice_id }}`: `stage` = 1, `regex_fields`, `text` |
-| 8 | Show the coarse view | Execute Sub-workflow `03 Rebuild point` |
-| 9 | Ask the vision model to read the PDF | HTTP Request POST OpenRouter, Header Auth `OpenRouter bearer`, Timeout 30000, Retry 1, On Error: Continue (using error output). Body below |
-| 10 | Validate the fields | Code: paste `toNumber` and `validateFields`; `const c = JSON.parse($json.choices[0].message.content); return [{json:{llm_fields: JSON.stringify(validateFields(c))}}];` On Error: Continue (using error output) |
-| 11 | Update the row: stage 2 | Data Table `invoices` Update where `id` equals: `stage` = 2, `llm_fields` |
-| 12 | Update the row: stage -1 | Data Table `invoices` Update where `id` equals: `stage` = -1, `error` = `={{ $json.error ? ($json.error.message || JSON.stringify($json.error)) : 'vision failed' }}`. Connected from the error outputs of 9 and 10 |
-| 13 | Show the sharp view | Execute Sub-workflow `03 Rebuild point`. Connected from 11 and from 12 |
-| 14 | Only continue if sharp | If: `={{ $('Update the row: stage 2').isExecuted }}` is true |
-| 15 | Write the narrative | Execute Sub-workflow `02b Write the narrative`, wait on |
+| 4 | Download the PDF for processing | HTTP Request GET `={{ $('Config').first().json.sample_url }}`, response File, binary `data`; validate URL against Config's sample base and allowlist before requesting |
+| 5 | Read the PDF as base64 | Code: `const item = $input.first(); const buffer = await this.helpers.getBinaryDataBuffer(0, 'data'); return [{json:{b64: buffer.toString('base64')}, binary: item.binary}];` |
+| 6 | Pull the text out of the PDF | Extract from File, operation PDF, binary `data`; empty text is valid |
+| 7 | Coarse read with regex | Code: paste `coarseRead`; `const text = $json.text || ''; return [{json:{regex_fields: JSON.stringify(coarseRead(text)), text}}];` |
+| 8 | Update the row: stage 1 | Data Table `invoices`, Update where `invoice_id` equals `={{ $('Config').first().json.invoice_id }}`: `stage` = 1, `regex_fields`, `text` |
+| 9 | Show the coarse view | Execute Sub-workflow `03 Rebuild point` |
+| 10 | Ask the vision model to read the PDF | HTTP Request POST OpenRouter, Header Auth `OpenRouter bearer`, Timeout 30000, Retry 1, On Error: Continue (using error output). Body below |
+| 11 | Validate the fields | Code: paste `toNumber` and `validateFields`; `const c = JSON.parse($json.choices[0].message.content); return [{json:{llm_fields: JSON.stringify(validateFields(c))}}];` On Error: Continue (using error output) |
+| 12 | Update the row: stage 2 | Data Table `invoices` Update where `invoice_id` equals: `stage` = 2, `llm_fields` |
+| 13 | Update the row: stage -1 | Data Table `invoices` Update where `invoice_id` equals: `stage` = -1, `error` = `={{ $json.error ? ($json.error.message || JSON.stringify($json.error)) : 'vision failed' }}`. Connected from the error outputs of 10 and 11 |
+| 14 | Show the sharp view | Execute Sub-workflow `03 Rebuild point`. Connected from 12 and from 13 |
+| 15 | Write the narrative if ready | Execute Sub-workflow `02b Write the narrative`, wait on, mapping tenant and customer from Config; 02b's snapshot gate returns no items unless every invoice is sharp |
 
-Node 9 body (JSON expression):
+Node 10 body (JSON expression):
 
 ```js
 ={{ JSON.stringify({
@@ -906,6 +951,8 @@ Node 9 body (JSON expression):
 
 Sticky notes (two): "Stages top to bottom: received → coarse (regex, on purpose wrong on German numbers) → sharp (vision) → narrative. Each stage ends in Rebuild." and "Errors land in stage -1 and still rebuild. The card stays half-blurry, the demo continues."
 
+Renumber the original rows 7 through 13 as 8 through 14 after inserting the download and extraction steps; there are 15 actual nodes including the final narrative call. All Rebuild and invoice update inputs reference Config explicitly, with tenant and customer conditions on invoice updates. Route download, encoding, and extraction error outputs to `Update the row: stage -1` as well. Persist errors as terminal failures, not pending; use separate successful stage-2 output data to avoid reading an unexecuted node. Do not add an IF based on another node's execution flag.
+
 - [ ] **Step 3: Build `01 Ingest`** (12 nodes)
 
 | # | Node | Settings |
@@ -915,15 +962,17 @@ Sticky notes (two): "Stages top to bottom: received → coarse (regex, on purpos
 | 3 | Download the chosen sample | HTTP Request GET `={{ $json.SAMPLES_BASE_URL }}/{{ $json.sample }}`, Response format: File, output binary `data` |
 | 4 | Hash the PDF | Crypto, Hash SHA256, Binary File: on, binary property `data`, property name `pdf_hash` |
 | 5 | Seen this hash before? | Data Table `invoices` Get where `pdf_hash` equals `={{ $json.pdf_hash }}`. Always output data: on |
-| 6 | Is it a duplicate? | If: `={{ !!$json.id }}` |
+| 6 | Is it a duplicate? | If: `={{ !!$json.invoice_id }}` |
 | 7 | Say it is a duplicate | Form (Form Ending). Completion title "Duplicate", message `=That's {{ $('Seen this hash before?').first().json.filename }} again (hash match). Nothing ingested.` |
-| 8 | Resolve the customer and manager | Code: paste `resolveUpload`; `const cfg = $('Config').first().json; const r = resolveUpload(cfg.sample, cfg.worker, JSON.parse(cfg.WORKERS)); const id = 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); return [{json:{...r, invoice_id: id, filename: cfg.sample, pdf_hash: $('Hash the PDF').first().json.pdf_hash, received_at: new Date().toISOString().replace(/\.\d{3}Z$/,'Z')}}];` |
+| 8 | Resolve the customer and manager | Code: paste `resolveUpload`; `const cfg = $('Config').first().json; const r = resolveUpload(cfg.sample, cfg.worker, JSON.parse(cfg.WORKERS)); const id = 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); return [{json:{...r, invoice_id: id, sample_url: cfg.SAMPLES_BASE_URL + '/' + cfg.sample, filename: cfg.sample, pdf_hash: $('Hash the PDF').first().json.pdf_hash, received_at: new Date().toISOString().replace(/\.\d{3}Z$/,'Z')}}];` |
 | 9 | Upsert the customer row | Data Table `customers`, Insert or Update (match on `customer_id` and `manager_id`): `worker_id`, `name` = `={{ $json.customer_id.charAt(0).toUpperCase() + $json.customer_id.slice(1) }}` only on insert if the node supports it, otherwise set it every time |
-| 10 | Append the invoice row | Data Table `invoices`, Insert: `id` = invoice_id, `customer_id`, `worker_id`, `manager_id`, `pdf_hash`, `filename`, `stage` = 0, `text` = '', `regex_fields` = '{}', `llm_fields` = '{}', `error` = '', `received_at` |
-| 11 | Process in the background | Execute Sub-workflow `02 Process`, **Wait for Sub-Workflow Completion: off**, inputs `invoice_id`, `customer_id`, `manager_id`; binary passes with the item |
+| 10 | Append the invoice row | Data Table `invoices`, Insert: `invoice_id` = invoice_id, `customer_id`, `worker_id`, `manager_id`, `pdf_hash`, `filename`, `stage` = 0, `text` = '', `regex_fields` = '{}', `llm_fields` = '{}', `error` = '', `received_at` |
+| 11 | Process in the background | Execute Sub-workflow `02 Process`, **Wait for Sub-Workflow Completion: off**, inputs `invoice_id`, `customer_id`, `manager_id`, `sample_url` from `Resolve the customer and manager`; no binary input |
 | 12 | Say it was received | Form (Form Ending). Title "Received", message "Watch the dashboard. Rough in two seconds, sharp in thirty." |
 
 Connections: 6 true → 7; 6 false → 8 → 9 → 10 → 11 → 12. Add a 13th node after 10, **disabled**: Google Drive, Upload file, binary `data`, named `Keep the PDF for accounting retention`, with its own sticky "Disabled. Swap for your storage. The PDF outlives a GDPR removal of the searchable record." Sticky on the Form: "No file field on purpose. Samples download from the repo. To accept uploads, add a File field and delete node 3."
+
+Before downloading, validate sample and worker and resolve the tenant. Scope duplicate lookup to `pdf_hash` AND `manager_id` AND `customer_id`, deriving tenant/customer from validated Config rather than a Data Table result. Duplicate means a matching `invoice_id`, not built-in row `id`. Add a validation Code node after Config (14 nodes including the disabled storage example), then renumber. All customer and invoice mappings after Data Table nodes explicitly reference `Resolve the customer and manager`; preserve existing customer narrative, deletion state, and display name. Customer ownership stays with the first worker for this booth corpus. Null is the empty dateTime value, never an empty string. The disabled storage example must reattach the original download binary before enabling it.
 
 - [ ] **Step 4: Test the happy path**
 
@@ -972,7 +1021,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 | # | Node | Settings |
 |---|---|---|
 | 1 | List this manager's customers | Webhook GET, path `customers`, Respond: Using Respond to Webhook node. Options: Allowed Origins `*` |
-| 2 | Config | `QDRANT_URL`, `COLLECTION`, `WORKERS`. Include other input fields: on |
+| 2 | Config | `QDRANT_URL`, `COLLECTION`, `WORKERS`, `MANAGERS`, `qdrant_started_at` = `={{ Date.now() }}`. Include other input fields: on |
 | 3 | Scroll live customers | HTTP Request POST `.../points/scroll`, Header Auth `Qdrant api-key`. Body below. Settings: Include response headers and status: off |
 | 4 | Scroll removed customers | same, body differs by one condition (below) |
 | 5 | Shape the cards | Code, paste `shapeCards` and `splitRemoved`; body below |
@@ -993,14 +1042,12 @@ Node 4 body: same, but `must` is `[ { key: 'manager_id', match: { value: qs.mana
 Node 5 body (after the pasted functions):
 
 ```js
-const t0 = $('Scroll live customers').first().json.time || 0;   // Qdrant reports its own time in seconds
-const t1 = $('Scroll removed customers').first().json.time || 0;
 const workers = JSON.parse($('Config').first().json.WORKERS);
 const live = $('Scroll live customers').first().json.result.points;
 const gone = $('Scroll removed customers').first().json.result.points;
 const { cards } = splitRemoved(shapeCards(live, workers));
 const { removed } = splitRemoved(shapeCards(gone, workers));
-return [{ json: { cards, removed, latency_ms: Math.round((t0 + t1) * 1000) } }];
+return [{ json: { cards, removed, latency_ms: Date.now() - $('Config').first().json.qdrant_started_at } }];
 ```
 
 - [ ] **Step 2: Build the search path** (5 nodes)
@@ -1010,7 +1057,7 @@ return [{ json: { cards, removed, latency_ms: Math.round((t0 + t1) * 1000) } }];
 | 7 | Search three vectors in one request | Webhook GET, path `search`, Respond: Using Respond to Webhook node |
 | 8 | Config (search) | Edit Fields, same values as node 2 |
 | 9 | Run the hybrid query | HTTP Request POST `.../points/query`, Header Auth. Body: the section 11 body from `qdrant/smoke.sh` step 3 with `servers` replaced by `qs.q`, `m_anna` by `qs.manager`, `$NOW` by `new Date().toISOString()`, `with_payload: ['customer_id','invoices']`, built the same way as node 3 with an IIFE |
-| 10 | Pick the matched line | Code, paste `pickMatchedLine`; `const r = $json.result.points; const q = $('Search three vectors in one request').first().json.query.q; return [{json:{results: r.map(p => ({customer_id: p.payload.customer_id, score: +p.score.toFixed(4), matched_line: pickMatchedLine(q, p.payload.invoices)})), latency_ms: Math.round(($json.time||0)*1000)}}];` |
+| 10 | Pick the matched line | Code, paste `pickMatchedLine`; `const r = $json.result.points; const q = $('Search three vectors in one request').first().json.query.q; return [{json:{results: r.map(p => ({customer_id: p.payload.customer_id, score: +p.score.toFixed(4), matched_line: pickMatchedLine(q, p.payload.invoices)})).filter(p => p.matched_line !== null), latency_ms: Date.now() - $('Config (search)').first().json.qdrant_started_at}}];` |
 | 11 | Respond with matches | Respond to Webhook, JSON, CORS header as node 6 |
 
 Sticky (one, over node 9): "Eight primitives, one request. Tenant filter, is_empty, bm25, ColBERT multivector, dense, inference ×3, RRF, decay formula."
@@ -1025,10 +1072,12 @@ curl -s "$B/customers?manager=m_anna" | python3 -c 'import sys,json; d=json.load
 curl -s "$B/customers?manager=m_anna&overdue_gte=10000" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert {c["customer_id"] for c in d["cards"]} == {"acme","beta"}, d; print("filter ok")'
 curl -s "$B/customers?manager=m_ben" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert not any(c["customer_id"]=="acme" and c["worker"]=="Tom" for c in d["cards"]); print("tenant ok")'
 curl -s "$B/search?manager=m_anna&q=servers" | python3 -c 'import sys,json; d=json.load(sys.stdin); r=d["results"]; assert r and r[0]["customer_id"]=="acme" and "servers" in (r[0]["matched_line"] or ""), d; assert d["latency_ms"] < 500; print("search ok", d["latency_ms"])'
-curl -s "$B/search?manager=m_anna&q=zebra+unicorn" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert all(x["matched_line"] is None for x in d["results"]), d; print("no-match ok")'
+curl -s "$B/search?manager=m_anna&q=zebra+unicorn" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["results"] == [], d; print("no-match ok")'
 ```
 
-Expected: five `ok` lines. If `latency_ms` is missing because Qdrant's `time` field isn't exposed, wrap nodes 3 and 9 with `Date.now()` captured in `Config` (add field `t0` = `={{ Date.now() }}`) and compute `Date.now() - t0` in the Code node.
+Expected: five `ok` lines. Timing uses wall milliseconds from the path's Config timestamp through Qdrant response shaping, including Cloud transport and inference.
+
+Config captures `qdrant_started_at = Date.now()` immediately before each Qdrant path, and shaping computes wall elapsed milliseconds. Qdrant `time` is server processing time and must not be presented as Cloud call latency. Add a validation Code node to each read path (13 actual nodes total), before its HTTP request; Config includes `MANAGERS`. Preserve two independent Config references. Search maps candidates to matched lines and returns only rows with a non-null matched line, preserving hybrid rank order. This is an explicit lexical admission rule for the booth exhibit, not a general semantic relevance threshold; a positive RRF score cannot establish relevance. Filter the mapped `results` before response and compute search latency from `Config (search).qdrant_started_at`. Add tests for unknown manager, malformed/negative thresholds, blank search, unrelated query returning `[]`, and manager isolation. Limit 50 is a booth-corpus bound; fail the corpus check if it is exceeded or implement proper ordered-scroll pagination before expanding scope.
 
 - [ ] **Step 4: Export, scrub, commit**
 
@@ -1044,189 +1093,58 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 9: Dashboard Page
 
 **Files:**
-- Create: `dashboard/app.js`, `dashboard/app.test.js`, `dashboard/index.html`, `dashboard/chime.wav` (any three short ascending tones; generate with the python snippet below)
-- Test: `node --test dashboard/` plus a manual check in the browser
+- Create: `dashboard/app.js`, `dashboard/app.test.js`, `dashboard/index.html`, `dashboard/chime.wav`.
+- Test: `node --test dashboard/*.test.js` and browser checks below.
 
 **Interfaces:**
-- Consumes: the two read endpoints from Task 8, the write endpoint from Task 10 (buttons are wired here, tested there).
-- Produces: `dashboard/app.js` exporting (CommonJS when `module` exists, globals otherwise) `blurFor(stage)`, `diffCards(prev, next)`, `applySearch(cards, results)`, `fmtEUR(n)`.
+- Consumes Task 8 read envelopes `{cards, removed, latency_ms}` and `{results, latency_ms}`, and Task 10's POST `/customers/remove` and `/customers/restore` endpoints with `{manager, customer}`. Capture the action separately to select its allowlisted path.
+- `app.js` exports pure helpers in CommonJS for Node tests and as browser globals: `blurFor`, `diffCards`, `applySearch`, `fmtEUR`, plus the request-context and rung-timer helpers described below. Export injectable controller logic to test request ordering without a browser.
+- `index.html` is served on `http://localhost:8000`, loads `app.js`, and contains the DOM/controller wiring. No keys in the page. Validate and persist an HTTP(S) n8n base URL; canceled/empty input keeps setup visible and starts no requests.
 
-- [ ] **Step 1: Write `dashboard/app.test.js`**
+- [ ] **Step 1: Write meaningful dashboard tests**
 
-```js
-const test = require('node:test'); const assert = require('node:assert');
-const { blurFor, diffCards, applySearch, fmtEUR } = require('./app');
-const card = (o) => ({ customer_id: 'acme', stage: 2, rung: 3, latest: { invoice_no: 'I', amount: 12300, stage: 2 }, ...o });
-test('blur per stage', () => { assert.equal(blurFor(0), 14); assert.equal(blurFor(1), 5); assert.equal(blurFor(2), 0); });
-test('stage drop re-blurs and amount change is reported', () => {
-  const ev = diffCards([card({})], [card({ stage: 0, rung: 0, latest: { invoice_no: 'J', amount: 12.3, stage: 0 } })]);
-  assert.deepEqual(ev, [{ customer_id: 'acme', rung_from: 3, rung_to: 0, amount_changed: true }]);
-});
-test('rung up emits chime-worthy event', () => {
-  const ev = diffCards([card({ stage: 1, rung: 1 })], [card({ stage: 2, rung: 2 })]);
-  assert.equal(ev[0].rung_to, 2); assert.equal(ev[0].amount_changed, false);
-});
-test('new card has no previous', () => assert.deepEqual(diffCards([], [card({})]), [{ customer_id: 'acme', rung_from: null, rung_to: 3, amount_changed: false }]));
-test('empty search dims nothing and flags no matches', () => {
-  const s = applySearch([card({}), card({ customer_id: 'beta' })], []);
-  assert.equal(s.noMatches, true); assert.deepEqual(s.highlight, {});
-});
-test('search highlights matches only', () => {
-  const s = applySearch([card({}), card({ customer_id: 'beta' })], [{ customer_id: 'acme', score: 0.9, matched_line: 'I · servers' }]);
-  assert.equal(s.noMatches, false); assert.deepEqual(s.highlight, { acme: 'I · servers' }); assert.deepEqual(s.dim, ['beta']);
-});
-test('euro formatting', () => { assert.equal(fmtEUR(12300), '€12,300.00'); assert.equal(fmtEUR(12.3), '€12.30'); assert.equal(fmtEUR(null), '?'); });
-```
+Use `node:test` and controllable deferred fetch promises plus an injected clock. Cover:
 
-- [ ] **Step 2: Run, verify failure**
+1. Blur is 14/5/0 px at stages 0/1/2; invalid/errored stages stay visibly coarse. Amount changes and rung drops are detected. New cards and initial hydration never chime.
+2. `fmtEUR(12300)` is `€12,300.00`, `fmtEUR(12.3)` is `€12.30`; null, empty, and nonfinite values are `?`, never `NaN` or a invented zero.
+3. Search results already admitted by Task 8 are hits regardless of score sign or absent snippet; do not use `score > 0` as a relevance threshold. Intersect result IDs with the displayed live cards. No displayed hits means `noMatches: true`, no rings, and no dimmed cards. Clearing the query means inactive search, distinct from an active query with zero hits.
+4. Resolve an old Anna list/search/write after switching to Ben: neither cards, removed tray, highlights, errors, failure counts, timers, nor latency badges change in Ben. Switching back cannot revive the obsolete result. Repeat with a changed overdue filter, changed query, and cleared query.
+5. Rapid polls are single-flight per context. A context switch aborts obsolete reads and starts the current read promptly. Old finally blocks cannot clear a newer request's busy flag or schedule a duplicate timer. A delayed search response cannot overwrite a later query or a cleared search.
+6. HTTP 4xx/5xx, malformed JSON, and invalid envelopes are errors. Search failure keeps current cards/tray and shows an error, not a fabricated no-match state. Write failure preserves state, re-enables the control, and shows the action error. A failed request and an abort are distinct; only current list failures count toward the offline banner.
+7. A successful poll while search is active recomputes highlights/dimming from cached results against the new cards. Filtering or clearing search preserves the most recent removed tray. New cards, a new latest invoice ID, or a rung drop start/reset timers; a visible climb freezes every newly crossed rung once, including jumps 0→2/3. Equal rung polls do not restart them. Zero seconds renders as `0.0s`. Initial ready cards show unknown elapsed times rather than fabricated zero-duration progress.
+8. An invoice/customer/matched line containing `<img onerror=...>`, quotes, or HTML markup renders as literal text. An action queued on Anna captures Anna/customer at click time; double clicks issue one write.
 
-Run: `node --test dashboard/`
-Expected: `Cannot find module './app'`.
+- [ ] **Step 2: Run tests and verify they fail for missing implementation**
 
-- [ ] **Step 3: Write `dashboard/app.js`**
+Run `node --test dashboard/*.test.js`; expect missing `app.js`/exports before implementation.
 
-```js
-// Pure logic for the dashboard. No DOM here. Loaded by index.html and by node --test.
-function blurFor(stage) { return stage <= 0 ? 14 : stage === 1 ? 5 : 0; }
-function diffCards(prev, next) {
-  const byId = Object.fromEntries(prev.map((c) => [c.customer_id, c]));
-  return next.map((c) => {
-    const p = byId[c.customer_id];
-    return {
-      customer_id: c.customer_id,
-      rung_from: p ? p.rung : null,
-      rung_to: c.rung,
-      amount_changed: !!p && (p.latest && p.latest.amount) !== (c.latest && c.latest.amount),
-    };
-  }).filter((e) => e.rung_from !== e.rung_to || e.amount_changed);
-}
-function applySearch(cards, results) {
-  const hits = (results || []).filter((r) => r.matched_line || r.score > 0);
-  if (!hits.length) return { noMatches: true, highlight: {}, dim: [] };
-  const highlight = Object.fromEntries(hits.map((r) => [r.customer_id, r.matched_line || '']));
-  return { noMatches: false, highlight, dim: cards.map((c) => c.customer_id).filter((id) => !(id in highlight)) };
-}
-function fmtEUR(n) { return n === null || n === undefined ? '?' : '€' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-if (typeof module !== 'undefined') module.exports = { blurFor, diffCards, applySearch, fmtEUR };
-```
+- [ ] **Step 3: Implement helpers and request controller**
 
-- [ ] **Step 4: Run tests, verify pass**
+Keep immutable last accepted `cards`, `removed`, and cached search results separate from presentation. Scope state by a monotonically increasing context generation (manager, filter, and later Edge source). Search also owns a query sequence. Capture generation, manager, filter, source, query, and customer before each request; commit response/error/latency only if its context is still current. Use `AbortController` to cancel old reads, plus sequence/generation checks since cancellation can race with completion. A write is not undone by aborting the browser; capture its target context, never update another context, and refresh the current context after it settles.
 
-Run: `node --test dashboard/`
-Expected: `# fail 0`.
+Read polling uses a self-scheduling `setTimeout` two seconds after settlement, never `setInterval`. Use one in-flight list per generation; coalesce same-context immediate refreshes into one follow-up. Manager/filter changes clear cards/tray/highlights/timers/errors immediately, invalidate old reads, and request the new context. Keep the query text across a manager switch, but rerun it for that manager; never reuse another manager's hits. Debounce search by 200 ms, invalidate synchronously on every keystroke (including clear), URL-encode all query fields with `URLSearchParams`, and show pending/error states distinctly. While a query is pending, remove prior-query rings. Active search and overdue filter compose by intersecting search results with filtered live cards. Rerun active search on the polling cadence without overlapping searches; retain accepted results during same-query refreshes, then recompute presentation after every accepted list/search response.
 
-- [ ] **Step 5: Write `dashboard/index.html`**
+The fetch wrapper checks `response.ok` before parsing, validates the envelope and field types, measures browser RTT separately, and applies a bounded request timeout (for example 10 seconds) so hung reads cannot stop polling. Clear timeout handles in `finally`. A real current list failure increments the counter; a success resets it; three failures show `offline · showing last known cards`. Abort/stale responses do not count. Search/write errors have their own visible messages and do not replace the offline state. The latency badge labels the backend's metric honestly and records the operation whose current response it displays; never substitute browser RTT for backend `latency_ms`.
 
-```html
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Invoice Memory</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-  :root{--bg:#0b0d12;--card:#161a23;--fg:#e8e8ea;--mute:#8a8f9c;--ring:#dc244c;--ok:#2ecc71}
-  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 Helvetica,Arial,sans-serif}
-  header{display:flex;gap:16px;align-items:center;padding:16px 24px;border-bottom:1px solid #222}
-  header .tab{padding:6px 14px;border-radius:999px;background:#222;cursor:pointer}
-  header .tab.on{background:var(--ring)}
-  header input{background:#111;border:1px solid #333;color:var(--fg);padding:8px 12px;border-radius:8px;font-size:16px}
-  #badge{margin-left:auto;color:var(--mute);font-variant-numeric:tabular-nums}
-  #banner{display:none;background:#5a1a1a;padding:8px 24px}
-  main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;padding:24px}
-  .card{background:var(--card);border-radius:14px;padding:18px;transition:filter .6s,opacity .3s;position:relative;border:2px solid transparent}
-  .card.hit{border-color:var(--ring)} .card.dim{opacity:.25}
-  .card h2{margin:0 0 4px;font-size:20px} .card .w{color:var(--mute);font-size:13px}
-  .amt{font-size:28px;margin:10px 0 4px;font-variant-numeric:tabular-nums}
-  .latest{color:var(--mute)} .latest b{color:var(--fg)}
-  .ladder{display:flex;gap:6px;margin:12px 0 6px} .rung{flex:1;height:8px;border-radius:4px;background:#2a2f3a} .rung.lit{background:var(--ok)}
-  .times{display:flex;gap:6px;font-size:11px;color:var(--mute)} .times span{flex:1;text-align:center}
-  .narr{margin-top:10px;font-size:14px;color:#c9ccd4} .match{margin-top:8px;color:var(--ring);font-size:14px}
-  .btns{margin-top:12px;display:flex;gap:8px} .btns button{background:#222;color:var(--fg);border:0;padding:6px 10px;border-radius:6px;cursor:pointer}
-  #removed{padding:0 24px 24px;color:var(--mute);font-size:14px}
-  #nomatch{display:none;padding:0 24px;color:var(--mute)}
-</style></head>
-<body>
-<header>
-  <strong>Invoice Memory</strong>
-  <span id="tabs"></span>
-  <input id="q" placeholder="search: servers, consulting, licenses">
-  <input id="over" type="number" placeholder="overdue over" style="width:130px">
-  <label><input type="checkbox" id="mute" checked> mute</label>
-  <span id="badge">—</span>
-</header>
-<div id="banner">offline · showing last known cards</div>
-<div id="nomatch">no matches</div>
-<main id="grid"></main>
-<div id="removed"></div>
-<audio id="chime" src="chime.wav"></audio>
-<script src="app.js"></script>
-<script>
-const CONFIG = { base: localStorage.getItem('n8n') || prompt('n8n base URL (https://x.app.n8n.cloud)'), managers: { m_anna: 'Anna', m_ben: 'Ben' } };
-localStorage.setItem('n8n', CONFIG.base);
-let manager = 'm_anna', prev = [], fails = 0, searchState = null, litAt = {};
-const $ = (s) => document.querySelector(s);
-function tabs() { $('#tabs').innerHTML = Object.entries(CONFIG.managers).map(([id, n]) => `<span class="tab ${id === manager ? 'on' : ''}" data-id="${id}">${n}</span>`).join(''); }
-$('#tabs').onclick = (e) => { if (e.target.dataset.id) { manager = e.target.dataset.id; prev = []; litAt = {}; tabs(); poll(); } };
-async function api(path) { const t = performance.now(); const r = await fetch(`${CONFIG.base}/webhook/${path}`); const j = await r.json(); j.rtt_ms = Math.round(performance.now() - t); return j; }
-function render(cards, removed) {
-  const hl = searchState ? searchState.highlight : {}; const dim = searchState ? searchState.dim : [];
-  $('#grid').innerHTML = cards.map((c) => {
-    const t = litAt[c.customer_id] || {};
-    return `<div class="card ${c.customer_id in hl ? 'hit' : ''} ${dim.includes(c.customer_id) ? 'dim' : ''}" style="filter:blur(${blurFor(c.stage)}px)">
-      <h2>${c.name}</h2><div class="w">${c.worker} · ${c.invoice_count} invoices · ${c.pending_count ? c.pending_count + ' processing' : 'up to date'}</div>
-      <div class="amt">${fmtEUR(c.open_amount)} open</div>
-      <div class="latest">latest <b>${c.latest ? c.latest.invoice_no : '—'}</b> · <b>${fmtEUR(c.latest && c.latest.amount)}</b> · ${['received', 'rough', 'sharp'][c.latest ? c.latest.stage : 0] || 'coarse'}${c.overdue_count ? ` · <b>${c.overdue_count} overdue</b>` : ''}</div>
-      <div class="ladder">${[1, 2, 3].map((r) => `<div class="rung ${c.rung >= r ? 'lit' : ''}"></div>`).join('')}</div>
-      <div class="times">${[1, 2, 3].map((r) => `<span>${t[r] ? t[r] + 's' : ''}</span>`).join('')}</div>
-      ${c.narrative ? `<div class="narr">${c.narrative}</div>` : ''}
-      ${hl[c.customer_id] ? `<div class="match">matched ${hl[c.customer_id]}</div>` : ''}
-      <div class="btns"><button data-act="remove" data-id="${c.customer_id}">Remove</button></div>
-    </div>`;
-  }).join('');
-  $('#removed').innerHTML = removed.length ? 'removed (manager can\'t see): ' + removed.map((r) => `${r.name} · purge ${r.purge_at.slice(0, 10)} <button data-act="restore" data-id="${r.customer_id}">Restore</button>`).join(' · ') : '';
-}
-async function poll() {
-  try {
-    const over = $('#over').value; const d = await api(`customers?manager=${manager}${over ? '&overdue_gte=' + over : ''}`);
-    fails = 0; $('#banner').style.display = 'none';
-    const ev = diffCards(prev, d.cards); const now = Date.now();
-    for (const e of ev) {
-      if (e.rung_from === null || e.rung_to < (e.rung_from || 0)) litAt[e.customer_id] = { start: now };
-      else if (e.rung_to > (e.rung_from || 0)) { const s = (litAt[e.customer_id] || { start: now }); s[e.rung_to] = ((now - s.start) / 1000).toFixed(1); if (!$('#mute').checked) $('#chime').play().catch(() => {}); }
-    }
-    prev = d.cards; render(d.cards, d.removed);
-    $('#badge').textContent = `${d.latency_ms} ms qdrant · ${d.rtt_ms} ms round trip · cloud`;
-  } catch (e) { if (++fails >= 3) $('#banner').style.display = 'block'; }
-}
-$('#q').oninput = async () => {
-  const q = $('#q').value.trim();
-  if (!q) { searchState = null; $('#nomatch').style.display = 'none'; render(prev, []); return; }
-  const d = await api(`search?manager=${manager}&q=${encodeURIComponent(q)}`);
-  searchState = applySearch(prev, d.results); $('#nomatch').style.display = searchState.noMatches ? 'block' : 'none';
-  $('#badge').textContent = `${d.latency_ms} ms qdrant · ${d.rtt_ms} ms round trip · search`; render(prev, []);
-};
-$('#over').oninput = poll;
-document.body.onclick = async (e) => {
-  const act = e.target.dataset.act; if (!act) return;
-  await fetch(`${CONFIG.base}/webhook/customers/${act}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ manager, customer: e.target.dataset.id }) });
-  poll();
-};
-tabs(); poll(); setInterval(poll, 2000);
-</script></body></html>
-```
+Timer state is stored for the full current list context, keyed by customer and latest invoice ID (Task 8 must expose `latest.id`). Rung drops or changed IDs begin an observation epoch using the injected monotonic clock. When rungs climb, persist the timer object and freeze each crossed rung at the observed elapsed duration; repeated polls keep frozen values. Initial hydration has no known start time: leave existing lit-rung durations blank. Chime only for observed upward transitions after baseline, once per accepted transition; mute starts checked and playback rejection is handled. Polling may skip intermediate stages, so chimes/times reflect observations, not guaranteed backend stage timings. Hide stale narrative unless the card's current rung is 3.
 
-Generate the chime once: `python3 -c "import wave,struct,math; w=wave.open('dashboard/chime.wav','w'); w.setparams((1,2,22050,0,'NONE','')); [w.writeframes(struct.pack('<h',int(8000*math.sin(2*math.pi*f*i/22050)))) for f in (660,880,1100) for i in range(2200)]; w.close()"`
+- [ ] **Step 4: Implement the HTML surface and safe rendering**
 
-- [ ] **Step 6: Manual check**
+Dark grid, manager tabs, search input, numeric overdue input, latency badge, offline/action/search messages, mute toggle, and removed tray. Each live card shows name, worker, open amount, invoice/pending/overdue counts, latest invoice and its rough/sharp state, rung ladder, observed timers, current narrative, optional matched line, and Remove. The tray shows name, purge date, and Restore independently of search/filter results. Keep action controls unblurred and clickable; apply blur to the card's content region. Group by worker as specified. Validate the overdue value as a finite nonnegative number; blank clears it, invalid input makes no request and shows a validation message.
 
-Serve: `python3 -m http.server 8000 -d dashboard` and open `http://localhost:8000`. Enter the n8n base URL. Expected: Anna's cards appear with the ladder; switch to Ben, acme under Tom is gone; type `servers`, acme rings and shows `matched INV-4711 · Hetzner servers`; type `zebra`, "no matches" shows and no card dims; type 10000 in "overdue over", two cards remain. Submit `delta-001.pdf` with `w_jules` from the Form, switch to Ben: delta's card appears blurry and sharpens within 40 s with three timer values and (unmuted) three chimes; delta's English-format amount parses right at the coarse stage, so no flip there. To see the `€12.30` → `€12,300.00` flip, delete acme's rows from both tables and resubmit `acme-001.pdf`.
+Build DOM nodes with `createElement`, `textContent`, and `dataset`; do not interpolate server/config values into `innerHTML`, inline handlers, CSS, or HTML attributes. Delegate action events with `closest('button[data-act]')`. Disable the selected action while its POST is pending; validate the JSON `{ok: true}` response and restore controls on failure. Preserve cards/tray until successful write refresh; do not optimistically pretend a failed remove/restore succeeded. Clean up polling/debounce/timeouts and abort reads on page teardown. Edge source-switch integration follows the separate stretch plan and must use this same generation mechanism.
 
-- [ ] **Step 7: Commit**
+Generate three short ascending tones with Python stdlib `wave` (or use a short licensed chime), then run `node --test dashboard/*.test.js` and expect zero failures.
 
-```bash
-git add dashboard
-git commit -m "feat(dashboard): static manager dashboard with blur ladder, search, filter, removed tray
+- [ ] **Step 5: Manual browser checks**
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
+Serve `python3 -m http.server 8000 -d dashboard`. Verify canceled setup, valid setup, manager switching while reads are delayed, rapid search typing then clearing, filter changes during an in-flight poll, and unavailable/500 webhooks. Existing cards survive a same-context outage; other-manager cards never flash during a switch. Search `servers` highlights matching visible cards; `zebra unicorn` shows no matches with no dimming; clear retains the removed tray. With the filter set, hits outside it cannot hide the no-match indicator.
+
+Reset/reseed the designated synthetic demo rows per Task 7, then select its reserved live sample using the appropriate worker. If using `delta-001.pdf` with `w_jules`, clear delta first so it is not a duplicate. Observe blur and sharpening, frozen timers, and chimes only for stages observed after baseline. To rehearse the German amount correction, reset synthetic acme data using the documented reset procedure, then pick `acme-001.pdf` in the Form. Exercise successful/failed remove and restore, including switching manager while a write is pending. DevTools slow network and a mocked failed response make the races reproducible. Confirm untrusted sample names/snippets render literally and controls stay usable while content is blurred.
+
+- [ ] **Step 6: Export/review and commit during implementation**
+
+Run the dashboard tests and manual checks, then commit the dashboard files using the repository's attribution convention. This document review itself creates no implementation files or commits.
 
 ---
 
@@ -1239,18 +1157,23 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `03 Rebuild point`.
-- Produces: `POST <N8N_BASE_URL>/webhook/customers/remove` and `.../customers/restore`, body `{manager, customer}` → `{ok: true, purge_at?}`.
+- Produces: POST `/webhook/customers/remove` and `/webhook/customers/restore`, body `{manager, customer}`; success `{ok:true,purge_at}`.
 
-- [ ] **Step 1: Build** (7 nodes)
+- [ ] **Step 1: Build** (11 nodes)
 
 | # | Node | Settings |
 |---|---|---|
-| 1 | Remove a customer | Webhook POST, path `customers/remove`, Respond: Using Respond node, Allowed Origins `*` |
-| 2 | Restore a customer | Webhook POST, path `customers/restore`, same |
-| 3 | Decide the new deleted_at | Code (both webhooks connect here): `const b = $json.body; const removing = $json.webhookUrl.endsWith('/remove'); const now = new Date().toISOString().replace(/\.\d{3}Z$/,''); return [{json:{manager_id: b.manager, customer_id: b.customer, deleted_at: removing ? now + 'Z' : '', purge_at: removing ? new Date(Date.now()+30*864e5).toISOString().slice(0,10) : null}}];` |
-| 4 | Set or clear deleted_at | Data Table `customers` Update where `customer_id` equals and `manager_id` equals: `deleted_at` = `={{ $json.deleted_at }}` (empty clears) |
-| 5 | Rebuild the point | Execute Sub-workflow `03 Rebuild point`, wait on |
-| 6 | Respond | Respond to Webhook JSON `={{ {ok: true, purge_at: $('Decide the new deleted_at').first().json.purge_at} }}`, CORS header |
+| 1 | Remove a customer | Webhook POST customers/remove, Respond node, Allowed Origins * |
+| 2 | Config (remove) | Preserve JSON; MANAGERS, QDRANT_URL, COLLECTION, action=remove |
+| 3 | Restore a customer | Webhook POST customers/restore, Respond node, Allowed Origins * |
+| 4 | Config (restore) | Preserve JSON; same values, action=restore |
+| 5 | Validate the write identity | Both Config nodes connect here. Require body manager in MANAGERS and nonempty customer; emit manager_id, customer_id, action; invalid input returns 400 |
+| 6 | Load this customer's tombstone | Data Table customers Get by manager_id AND customer_id from validated node; Always Output Data; missing row returns 404 |
+| 7 | Decide the new deleted_at | Use validated action. Remove preserves existing tombstone or sets current ISO; restore sets null. Emit full ISO purge_at = deleted_at + 30 days or null |
+| 8 | Set or clear deleted_at | Data Table customers Update by both validated keys; null clears dateTime |
+| 9 | Rebuild the point | Execute 03, wait on; explicitly map both keys from validation |
+| 10 | Respond | Successful rebuild only: JSON ok:true, purge_at from decision node, CORS headers |
+| 11 | Respond to invalid writes | Respond JSON with 400/404/failure status; validation/missing-row/error paths terminate here |
 
 - [ ] **Step 2: Test**
 
@@ -1264,6 +1187,8 @@ qdrant/check_point.sh m_anna acme 'assert "deleted_at" not in p, p; print("resto
 ```
 
 Expected: four confirmations. In the browser (Task 9), Remove on acme moves it to the tray within 2 s, Restore brings it back.
+
+Add Config and a validation/customer lookup before the update (under 15 actual nodes). Map an explicit action from each webhook, validate manager/customer, and return 400/404 for invalid/missing inputs. Use ISO deleted_at for remove, null for restore, and full ISO purge_at; do not strip then append Z. Repeated remove preserves the first tombstone. Rebuild inputs reference validated tenant/customer explicitly. Return a failure response if rebuild fails, preserving table state for retry. Test same-slug cross-manager isolation and browser JSON POST preflight; add OPTIONS response only if the live n8n gate proves necessary.
 
 - [ ] **Step 3: Export, scrub, commit**
 
@@ -1286,18 +1211,22 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: Qdrant delete-by-filter body from Task 2 step 5.
 
-- [ ] **Step 1: Build** (6 nodes)
+- [ ] **Step 1: Build** (per-customer snapshot and loop; maximum 15 nodes)
 
 | # | Node | Settings |
 |---|---|---|
 | 1 | Every night at three | Schedule Trigger, daily 03:00 |
 | 2 | Config | `QDRANT_URL`, `COLLECTION`, `MANAGERS` |
-| 3 | One item per manager | Code: `const cutoff = new Date(Date.now()-30*864e5).toISOString().replace(/\.\d{3}Z$/,'Z'); return Object.keys(JSON.parse($json.MANAGERS)).map(m => ({json:{manager_id: m, cutoff}}));` |
-| 4 | Delete points removed over 30 days ago | HTTP Request POST `.../points/delete?wait=true`, body `={{ JSON.stringify({shard_key: $json.manager_id, filter: {must: [{key: 'deleted_at', range: {lt: $json.cutoff}}]}}) }}` |
-| 5 | Delete their customer rows | Data Table `customers` Delete where `deleted_at` is before `={{ $('One item per manager').first().json.cutoff }}` (if the node lacks date comparison: Get rows with `deleted_at` not empty, filter in a Code node by `< cutoff`, then Delete by `customer_id` + `manager_id`) |
-| 6 | Delete their invoice rows | Data Table `invoices` Delete where `customer_id` and `manager_id` match each row from node 5 |
+| 3 | Load removed customer rows | Data Table customers Get all rows with non-null deleted_at; Always Output Data on |
+| 4 | Capture eligible identities | Code: calculate cutoff once; filter valid deleted_at strictly earlier than cutoff, manager in Config MANAGERS; emit each `{manager_id,customer_id,deleted_at,cutoff}`; empty input returns `[]` |
+| 5 | Purge one customer at a time | Loop Over Items, batch size 1; all deletes reference the current loop item, never `.first()` over all candidates |
+| 6 | Delete this expired point | HTTP POST `points/delete?wait=true`, shard_key from loop item, filter must manager_id + customer_id + datetime deleted_at range `{lt: cutoff}`; assert HTTP success and Qdrant status ok |
+| 7 | Delete this customer's invoice rows | Data Table invoices Delete where manager_id AND customer_id match captured loop identity; Always Output Data on |
+| 8 | Delete this expired customer row | Data Table customers Delete where manager_id AND customer_id AND deleted_at equal captured values; Always Output Data on; loop back to 5 |
 
 Sticky: "Never run live at the booth. One sentence: purged at 30 days, PDFs stay in storage for tax retention."
+
+The snapshot precedes every delete, so no deletion output is used to recover identity. Stop ingest, processing, and restore before a purge run; this is not a transactional concurrent purge design. On any failed point deletion, retain table rows and stop. If a later delete fails, rerun with the same tombstoned customer: point and invoice deletes are idempotent, and customer is deleted last. Test two eligible customers in different managers, same slug in the other tenant surviving, a recent tombstone surviving, an empty candidate set, and an injected HTTP failure retaining source rows. The schedule's timezone must explicitly be Europe/Berlin.
 
 - [ ] **Step 2: Test**
 
@@ -1324,7 +1253,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Reset and ingest**
 
-Delete all rows in both Data Tables (UI). Recreate the collection: `qdrant/setup.sh` after `q DELETE /collections/customers` (run `. qdrant/lib.sh` first with `.env` sourced). Submit all 14 samples through the Form, 40 s apart, with the worker from `samples/manifest.json`. Skip `beta-004.pdf` for the corpus (it's the live duplicate moment).
+Delete all rows in both Data Tables (UI). Recreate the collection: `qdrant/setup.sh` after `q DELETE /collections/customers` (run `. qdrant/lib.sh` first with `.env` sourced). Submit the 13 unique samples through the Form, 40 s apart, with the worker from `samples/manifest.json`. Skip `beta-004.pdf` for the corpus (it's the live duplicate moment).
 
 - [ ] **Step 2: Write `qdrant/corpus_check.sh`**
 
@@ -1367,7 +1296,9 @@ PY
 - [ ] **Step 3: Run**
 
 Run: `chmod +x qdrant/corpus_check.sh && qdrant/corpus_check.sh`
-Expected: `CORPUS OK`. A failing `open_amount` means the vision model misread one invoice: open that invoice's row, read `llm_fields`, and either fix the sample text (make the amount unambiguous) or accept the drift and update `expected_amount` in `gen.py` with a comment. A failing search term means line items need a more distinctive word; edit `gen.py`, regenerate, re-ingest that customer.
+Expected: `CORPUS OK`. A failing `open_amount` means the vision model misread one invoice: open that invoice's row, read `llm_fields`, and fix extraction and retry against unchanged fixture amounts; never change the PDF ground truth to match a wrong model result. A failing search term means line items need a more distinctive word; edit `gen.py`, regenerate, re-ingest that customer.
+
+Full-corpus mode ingests 13 unique PDFs from the 14 files, then runs this checker. Live mode is a separate seed: after full validation, while processing is stopped, clear acme's invoice rows and rebuild with acme-002/acme-003 only, reserving acme-001 for the new-PDF correction moment. Reset to that seed before every rehearsal. Received_at makes the submitted acme-001 the latest card invoice. Keep beta-003 present and beta-004 reserved for the duplicate moment. Never run full-corpus expectations against the live seed; keep same-slug tenancy fixtures separate as well.
 
 - [ ] **Step 4: Commit**
 
@@ -1411,7 +1342,7 @@ Qdrant Cloud cluster with Inference enabled, n8n Cloud (1.105 or later, Data Tab
 
 1. Create a free Qdrant Cloud cluster with Inference enabled. Copy `.env.example` to `.env`, fill it in, run `qdrant/setup.sh`, then `qdrant/smoke.sh`.
 2. In n8n Cloud create two credentials: `Qdrant api-key` (Header Auth, header `api-key`) and `OpenRouter bearer` (Header Auth, header `Authorization`, value `Bearer <key>`). Create the two Data Tables as listed in `docs/superpowers/specs/2026-10-09-invoice-memory-design.md`, section 4.
-3. Import the six JSON files from `workflows/` (Workflows → Import from File), reassign the two credentials on each HTTP Request node, open the `Start here` sticky in `01 Ingest`, set the `Config` values, activate all six. Open `dashboard/index.html` from any static server and enter your n8n base URL.
+3. Import the seven JSON files from `workflows/` (Workflows → Import from File), reassign the two credentials on each HTTP Request node, open the `Start here` sticky in `01 Ingest`, set the `Config` values, activate trigger workflows after rebinding Data Tables and sub-workflow references. Open `dashboard/index.html` from any static server and enter your n8n base URL.
 
 ## What Each Workflow Does
 <one line each for 01, 02, 02b, 03, 04, 05, 06>
@@ -1424,7 +1355,7 @@ Qdrant Cloud cluster with Inference enabled, n8n Cloud (1.105 or later, Data Tab
 
 ## Known Limits
 - Coarse stage reads German number formats wrong on purpose. The vision stage fixes it.
-- Two uploads for the same customer in the same second: later rebuild wins, both saw all rows, converges on the next stage.
+- Concurrent uploads can leave a stale final view. Serialize booth submissions; rebuild after all overlapping writers finish.
 - `digest` truncates past roughly 30 invoices per customer.
 - The matched line in search is picked by token overlap in a Code node; MaxSim doesn't report which vector won.
 - Anonymizing payloads at seven days is not built; purge at 30 days is.
