@@ -364,13 +364,13 @@ git commit -m "feat(samples): 14 synthetic invoice PDFs, two in German number fo
 - Consumes: `computeView`, `uuidFromHex` from Task 4 (pasted).
 - Produces: sub-workflow `03 Rebuild point` with inputs `customer_id` (string), `manager_id` (string); on completion the Qdrant point for that customer reflects the Data Tables. Every later workflow calls it with exactly those two inputs.
 
-- [ ] **Step 1: Create the Data Tables in the n8n project** (UI, Data tables tab)
+- [x] **Step 1: Create the Data Tables in the n8n project** (UI, Data tables tab)
 
 `invoices`: custom columns `invoice_id` string, `customer_id` string, `worker_id` string, `manager_id` string, `pdf_hash` string, `filename` string, `text` string, `stage` number, `regex_fields` string, `llm_fields` string, `error` string, `received_at` dateTime.
 
 `customers`: columns `customer_id` string, `worker_id` string, `manager_id` string, `name` string, `deleted_at` dateTime, `narrative` string, `narrative_at` dateTime, `narrative_revision` string.
 
-Seed two rows by hand in `customers`: (`acme`, `w_tom`, `m_anna`, `Acme GmbH`) and (`acme`, `w_jules`, `m_ben`, `Acme GmbH`). Seed one row in `invoices` for each: invoice_id `inv_seed_a` / `inv_seed_b`, stage `1`, `regex_fields` = `{"invoice_no":"INV-4711","amount":12.3,"status":"open"}`, `text` = `seed`, `received_at` = now.
+Seed two rows by hand in `customers`: (`acme`, `w_tom`, `m_anna`, `Acme GmbH`) and (`acme`, `w_jules`, `m_ben`, `Acme GmbH`). Seed one row in `invoices` for each, with its tenant columns (`customer_id`, `worker_id`, `manager_id`, or Rebuild cannot find it): invoice_id `inv_seed_a` / `inv_seed_b`, stage `1`, `regex_fields` = `{"invoice_no":"INV-4711","amount":12.3,"status":"open"}`, `text` = `seed`, `received_at` = now.
 
 - [x] **Step 2: Write `scripts/check_point.py`** test-first (the point check for this and later tasks)
 
@@ -406,7 +406,7 @@ Code node 6 builds the same JSON as `bodies.upsert` (compare with `python3 scrip
 
 Sticky note (one): "Source of truth is the two Data Tables. This workflow is the only writer to Qdrant. Any stage, any retry, same point."
 
-- [ ] **Step 4: Test manually with the seeded rows** (after Step 5)
+- [x] **Step 4: Test manually with the seeded rows** (after Step 5)
 
 In the workflow editor, run with test input `{"customer_id": "acme", "manager_id": "m_anna"}`, then again with `m_ben`.
 
@@ -414,11 +414,13 @@ Run: `python3 scripts/check_point.py m_anna acme --expect stage=1 --expect lates
 Run: `python3 scripts/check_point.py m_ben acme --expect worker_id=w_jules`
 Expected: both print `ok`. Two points exist for slug `acme` (Review Focus 3).
 
-- [ ] **Step 5: Import and bind** (n8n Cloud)
+Result on 2026-10-09: both `ok`; two distinct points (`5a16f8b4-…` in `m_anna`, `c1dbab4e-…` in `m_ben`), each equal to `uuidFromHex(sha256("<manager>/acme"))`, so n8n's Crypto node hashes exactly what `ids.js` expects. A run with an unknown manager (`m1`) stopped at the Code node's `no customer row` guard, as designed.
+
+- [x] **Step 5: Import and bind** (n8n Cloud)
 
 Create the `Qdrant api-key` credential (Header Auth, name `api-key`, value the cluster key). Workflows → Import from File → `workflows/03-rebuild-point.json`. On `Upsert the point with inference`, select the credential. In `Config`, set `QDRANT_URL` to the cluster URL. Open each Data Table node once to confirm it resolved its table by name. Save. Then run Step 4.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add workflows scripts
