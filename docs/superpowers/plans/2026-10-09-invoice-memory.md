@@ -79,7 +79,7 @@ Every Python file under `scripts/` follows these rules; review rejects a script 
 
 Payload indexes, in order: `manager_id` keyword with `is_tenant: true`; `worker_id` keyword; `customer_id` keyword; `deleted_at` datetime; `last_invoice_at` datetime; `updated_at` datetime; `stage` integer; `invoices[].status` keyword; `invoices[].amount` float.
 
-- [ ] **Step 1: Write `.env.example`**
+- [x] **Step 1: Write `.env.example`**
 
 ```bash
 # .env.example  (copy to .env, never commit .env)
@@ -91,7 +91,7 @@ PDF_ENGINE=native
 N8N_BASE_URL=https://yourname.app.n8n.cloud
 ```
 
-- [ ] **Step 2: Write the failing tests** (stdlib `unittest`, no network)
+- [x] **Step 2: Write the failing tests** (stdlib `unittest`, no network)
 
 `test_env.py`:
 - parses `KEY=value`, skips blank lines and `#` comments, strips one pair of matching surrounding quotes, keeps `=` inside a value
@@ -124,28 +124,28 @@ N8N_BASE_URL=https://yourname.app.n8n.cloud
 - a non-404 `HttpError` on the first read propagates (an auth failure is not a missing collection)
 - a fake that ignores `sharding_method` on create: the read-back raises `SchemaDrift`
 
-- [ ] **Step 3: Run the tests, verify they fail**
+- [x] **Step 3: Run the tests, verify they fail**
 
 Run: `python3 -m unittest discover -s scripts`
 Expected: every test module errors with `ModuleNotFoundError`.
 
-- [ ] **Step 4: Implement the five modules**
+- [x] **Step 4: Implement the five modules**
 
 `ensure_collection` runs in this order: read the collection (404 means create it from `collection_spec()`); compare with `drift()` and stop on any mismatch; read `GET /collections/{name}/shards` and create each missing key with `PUT /collections/{name}/shards`; create each of `missing_indexes()` with `PUT /collections/{name}/index?wait=true`; read the collection and shard keys back and raise `SchemaDrift` unless drift, missing indexes, and missing keys are all empty. `main` prints each action, then `customers ok: custom sharding, shard keys m_anna m_ben, 9 indexes`.
 
-- [ ] **Step 5: Run the tests, verify they pass**
+- [x] **Step 5: Run the tests, verify they pass**
 
 Run: `python3 -m unittest discover -s scripts`
 Expected: `OK`.
 
-- [ ] **Step 6: Run against the cluster twice** (first live write; confirm before running)
+- [x] **Step 6: Run against the cluster twice** (first live write; confirm before running)
 
 Run: `python3 scripts/setup_collection.py && python3 scripts/setup_collection.py`
 Expected: the first run prints the collection, two shard keys, and nine indexes as created, then the `ok` line; the second run prints only the `ok` line.
 
 The shard listing follows [Qdrant's list-shard-keys response](https://api.qdrant.tech/api-reference/distributed/list-shard-keys). If the cluster rejects `sharding_method: custom`, stop: the payload-only fallback removes `shard_key` from every body in `bodies.py` and every workflow, keeps every tenant payload filter, is noted in the README, and cuts the Edge plan. An authentication or permission failure is not evidence that sharding is unavailable.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 curl -sSL https://www.apache.org/licenses/LICENSE-2.0.txt -o LICENSE
