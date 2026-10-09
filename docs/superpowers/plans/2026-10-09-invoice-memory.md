@@ -229,23 +229,25 @@ git commit -m "test(scripts): reference request bodies and a disposable-collecti
 
 **Interfaces:**
 - `REQUIRED_FIELDS`: `invoice_no`, `date`, `due_date`, `amount`, `vendor`, `customer_name`, `status`, `line_items_summary`
-- `extraction_body(pdf: bytes, model: str, engine: str) -> dict`: the exact body Task 7's vision node sends (temperature 0, `max_tokens` 400, `response_format` JSON object, the `file-parser` plugin with the engine, the system prompt, and the PDF as a base64 data URL)
+- `extraction_body(pdf: bytes, model: str, engine: str) -> dict`: the exact body Task 7's vision node sends (temperature 0, `max_tokens` 400, `response_format` a strict `json_schema` from `invoice_schema()` with all eight fields required, `amount` a number, and `status` an enum, the `file-parser` plugin with the engine, the system prompt, and the PDF as a base64 data URL)
 - `parse_reply(response: dict) -> dict`: returns the extracted fields; raises `ExtractionError` when there are no choices, the content is not bare JSON (a fenced code block fails, as it would in n8n's `JSON.parse`), or fields are missing (naming all of them)
 - `require_synthetic(path: Path, samples_dir: Path) -> Path`: raises `ValueError` unless the resolved path is a PDF inside `samples/`, so no real invoice is ever sent
 - `main(argv)`: `python3 scripts/openrouter_check.py samples/acme-001.pdf` sends with the `Authorization: Bearer` header and a 35 s timeout, prints the fields as JSON and `latency_ms` measured with `time.monotonic`
 
-- [x] **Step 1: Write the failing tests** for each interface line above: the body's model, temperature, response format, plugin engine, data URL decoding back to the input bytes, and all eight field names in the system prompt; `parse_reply` on a good reply, no choices, fenced JSON, and two missing fields; `require_synthetic` on a sample, a path outside `samples/`, and a `..` escape.
+- [x] **Step 1: Write the failing tests** for each interface line above: the body's model, temperature, strict schema (all eight fields required, no extras, a fresh copy per body), plugin engine, data URL decoding back to the input bytes, and all eight field names in the system prompt; `parse_reply` on a good reply, no choices, fenced JSON, and two missing fields; `require_synthetic` on a sample, a path outside `samples/`, and a `..` escape.
 
 - [x] **Step 2: Run, verify they fail; implement; run, verify they pass**
 
 Run: `python3 -m unittest discover -s scripts`
 
-- [ ] **Step 3: Run with a synthetic fixture** (after Task 5 produces the samples)
+- [x] **Step 3: Run with a synthetic fixture** (after Task 5 produces the samples)
 
 Run: `python3 scripts/openrouter_check.py samples/acme-001.pdf`
 Expected: the eight fields with `amount` 12300 and `latency_ms` under 30000. If the model rejects `file` input, open `https://openrouter.ai/models`, pick the cheapest mid-tier model that lists PDF input and `response_format`, set it in `.env`, rerun. If none works, set `PDF_ENGINE=pdf-text` in `.env` (text extraction instead of vision) and strike the word "vision" from `booth/script.md` in Task 13.
 
-- [ ] **Step 4: Commit**
+Result on 2026-10-09 with `anthropic/claude-haiku-5.5`, engine `native`: `acme-001.pdf` read as 12300 in 13.5 s and `beta-001.pdf` as 18750 in 8.7 s, both German-format totals. With `response_format: json_object` alone the model wrapped its JSON in a code fence, which n8n's `JSON.parse` would reject; the strict `json_schema` returns bare JSON.
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/openrouter_check.py scripts/test_openrouter_check.py
@@ -305,131 +307,43 @@ git commit -m "feat(code): pure functions for n8n Code nodes with node tests"
 
 **Files:**
 - Create: `samples/gen.py`, `samples/test_gen.py`, `samples/print.sh`
-- Generated: `samples/html/*.html`, `samples/manifest.json`, `samples/*.pdf`
-- Test: `python3 samples/test_gen.py`
+- Generated: `samples/html/*.html` (ignored), `samples/manifest.json`, `samples/*.pdf` (committed: the Form downloads them from the repo's raw URL)
+- Test: `python3 -m unittest discover -s samples`
 
-**Interfaces:**
-- Produces: `samples/manifest.json`, a list of `{file, worker_id, customer, expected_amount, format, status, items}`; the Form dropdown options in Task 7 are the `file` values; Task 12 uses `expected_amount` and `status` to check ingest.
+**Interfaces** (`gen.py` follows the Script Rules: pure core, thin `main`, no side effects on import):
+- `CUSTOMERS`: slug to `(worker_id, display name)`; `INVOICES`: 14 frozen `Invoice` values; `BOOTH_DATE = "2026-10-14"`
+- `money(amount, number_format) -> str`: `12.300,00 €` for `de`, `4,250.00 EUR` for `en`
+- `render_html(invoice) -> str`: one page with every value HTML-escaped; labels stay English (`Invoice No:`, `Date:`, `Due date:`, `From:`, `Total:`) so the coarse regex can find them, while German invoices get the `RECHNUNG` title and German numbers
+- `build() -> (pages, manifest)`: 13 pages (the duplicate is copied as a PDF, not rendered) and 14 manifest rows `{file, worker_id, customer, invoice_no, expected_amount, status, items, format[, duplicate_of]}`. The Form dropdown in Task 7 lists the `file` values; Task 12 checks ingest against `expected_amount` and `status`.
+- `print.sh`: prints each page with headless Chrome, stops if a PDF comes out empty, copies `beta-003.pdf` to `beta-004.pdf` so their bytes match
 
-- [ ] **Step 1: Write `samples/test_gen.py`**
+Data rule: every printed status agrees with its due date on `BOOTH_DATE`, so a model that reasons from dates and one that reads the printed status give the same answer. The plan's original data broke this for `beta-002` (due 10-12, open) and `delta-001` (due 10-02, open); their due dates moved to 10-26 and 10-30, and no status or amount changed.
 
-```python
-import json, os, subprocess, sys, hashlib
-here = os.path.dirname(os.path.abspath(__file__))
-subprocess.check_call([sys.executable, os.path.join(here, 'gen.py')])
-m = json.load(open(os.path.join(here, 'manifest.json')))
-assert len(m) == 14, len(m)
-assert sum(1 for r in m if r['format'] == 'de') == 2
-assert len({r['customer'] for r in m}) == 6
-assert {r['worker_id'] for r in m} == {'w_tom', 'w_lena', 'w_jules', 'w_mia'}
-dups = [r for r in m if r.get('duplicate_of')]
-assert len(dups) == 1 and dups[0]['customer'] == 'beta'
-over = {r['customer'] for r in m if r['status'] == 'overdue' and r['expected_amount'] >= 10000}
-assert len(over) == 2, over
-for term in ['servers', 'consulting', 'licenses']:
-    hits = {r['customer'] for r in m if r['worker_id'] in {'w_tom', 'w_lena'} and term in r['items']}
-    assert hits == {'servers': {'acme'}, 'consulting': {'beta'}, 'licenses': {'acme', 'gamma'}}[term], (term, hits)
-for r in m:
-    html = open(os.path.join(here, 'html', r['file'].replace('.pdf', '.html'))).read()
-    assert 'Total' in html and r['customer'] in r['file']
-    if r['format'] == 'de': assert '12.300,00' in html or '18.750,00' in html
-print('gen ok')
-```
+- [x] **Step 1: Write the tests** (`samples/test_gen.py`, no files written)
+- corpus shape: 14 unique files, 2 German, 6 customers, 4 workers
+- exactly one duplicate, `beta-004` of `beta-003`, identical apart from the file name
+- every file name starts with its customer slug and a hyphen (`resolveUpload` depends on it)
+- overdue at 10000 or more hits exactly acme and beta
+- among Anna's workers, `servers` hits {acme}, `consulting` {beta}, `licenses` {acme, gamma}
+- statuses agree with due dates on `BOOTH_DATE`
+- 13 pages, each with its invoice number, due date, customer name, and formatted total; the German pages show `12.300,00 €` and `18.750,00 €` under `RECHNUNG`; markup in a field is escaped
+- `money` in both formats
 
-- [ ] **Step 2: Run it, verify it fails**
+- [x] **Step 2: Run, verify they fail; implement `gen.py`; run, verify they pass**
 
-Run: `python3 samples/test_gen.py`
-Expected: `FileNotFoundError` for `gen.py`.
+Run: `python3 -m unittest discover -s samples`
+Expected: `ModuleNotFoundError` first, then `OK` (11 tests).
 
-- [ ] **Step 3: Write `samples/gen.py`** (stdlib only)
+- [x] **Step 3: Print the PDFs**
 
-```python
-#!/usr/bin/env python3
-"""Writes 14 synthetic invoice HTML files and manifest.json. Fake companies only."""
-import json, os
-here = os.path.dirname(os.path.abspath(__file__))
-os.makedirs(os.path.join(here, 'html'), exist_ok=True)
+Run: `python3 samples/gen.py && samples/print.sh`
+Expected: `wrote 13 pages and 14 manifest rows`, `14`, then two identical SHA-256 lines for `beta-003.pdf` and `beta-004.pdf`.
 
-# customer, worker (manager), display name
-CUST = {
-  'acme':  ('w_tom',   'Acme GmbH'),          # m_anna
-  'beta':  ('w_tom',   'Beta Logistics AG'),  # m_anna
-  'gamma': ('w_lena',  'Gamma Labs UG'),      # m_anna
-  'delta': ('w_jules', 'Delta Retail SE'),    # m_ben
-  'eps':   ('w_jules', 'Epsilon Media GmbH'), # m_ben
-  'zeta':  ('w_mia',   'Zeta Energy KG'),     # m_ben
-}
-# file, customer, invoice_no, date, due, amount, status, vendor, items, format
-ROWS = [
-  ('acme-001.pdf','acme','INV-4711','2026-09-01','2026-09-15', 12300.00,'overdue','Hetzner Online GmbH','Hetzner servers, rack 12, September','de'),
-  ('acme-002.pdf','acme','INV-4730','2026-09-20','2026-10-20',  4250.00,'open',   'Hetzner Online GmbH','Hetzner servers, bandwidth overage','en'),
-  ('acme-003.pdf','acme','INV-4750','2026-10-01','2026-10-31',   980.00,'open',   'Jetbrains s.r.o.',   'IDE licenses, 4 seats','en'),
-  ('beta-001.pdf','beta','INV-9001','2026-08-10','2026-08-24', 18750.00,'overdue','Deloitte GmbH',      'consulting, warehouse audit','de'),
-  ('beta-002.pdf','beta','INV-9002','2026-09-12','2026-10-12',  2100.00,'open',   'Deloitte GmbH',      'consulting, follow-up workshop','en'),
-  ('beta-003.pdf','beta','INV-9003','2026-10-02','2026-11-01',   640.00,'open',   'Office Depot',       'office supplies, pallets','en'),
-  ('beta-004.pdf','beta','INV-9003','2026-10-02','2026-11-01',   640.00,'open',   'Office Depot',       'office supplies, pallets','en'),  # byte-identical duplicate of beta-003
-  ('gamma-001.pdf','gamma','INV-2201','2026-09-05','2026-10-05', 1500.00,'paid',  'Microsoft Ireland',  'Office licenses, annual','en'),
-  ('gamma-002.pdf','gamma','INV-2202','2026-10-03','2026-11-02', 3200.00,'open',  'Microsoft Ireland',  'Azure compute, September','en'),
-  ('delta-001.pdf','delta','INV-5100','2026-09-02','2026-10-02', 7600.00,'open',  'Hetzner Online GmbH','Hetzner servers, store backend','en'),
-  ('delta-002.pdf','delta','INV-5101','2026-09-28','2026-10-28', 1250.00,'open',  'Shopify Inc.',       'platform fees, September','en'),
-  ('eps-001.pdf','eps','INV-3300','2026-09-15','2026-10-15',  9800.00,'open',    'Adobe Systems',      'Creative licenses, 10 seats','en'),
-  ('eps-002.pdf','eps','INV-3301','2026-10-04','2026-11-03',   450.00,'open',    'Canva Pty',          'design subscription','en'),
-  ('zeta-001.pdf','zeta','INV-7700','2026-09-08','2026-10-08', 5400.00,'paid',   'Siemens AG',         'turbine inspection, consulting','en'),
-]
-def money(x, fmt):
-    if fmt == 'de': return f"{x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.') + ' €'
-    return f"{x:,.2f} EUR"
-TPL = """<!doctype html><html><head><meta charset="utf-8"><style>
-body{{font-family:Helvetica,Arial,sans-serif;margin:48px;color:#111}} h1{{letter-spacing:.1em}} table{{border-collapse:collapse;width:100%;margin-top:24px}}
-td,th{{border-bottom:1px solid #ccc;padding:8px;text-align:left}} .total{{font-size:1.4em;margin-top:24px}} .meta td{{border:0;padding:2px 8px 2px 0}}
-</style></head><body>
-<h1>{title}</h1>
-<table class="meta"><tr><td>Invoice No: {no}</td></tr><tr><td>Date: {date}</td></tr><tr><td>Due date: {due}</td></tr>
-<tr><td>From: {vendor}</td></tr><tr><td>To: {customer}</td></tr><tr><td>Status: {status}</td></tr></table>
-<table><tr><th>Description</th><th>Qty</th><th>Amount</th></tr>
-<tr><td>{items}</td><td>1</td><td>{amount}</td></tr></table>
-<p class="total">Total: {amount}</p>
-<p style="color:#888;font-size:.8em">Synthetic invoice for a demo. Not a real company, not a real debt.</p>
-</body></html>"""
-manifest = []
-for f, c, no, date, due, amt, status, vendor, items, fmt in ROWS:
-    html = TPL.format(title='RECHNUNG' if fmt == 'de' else 'INVOICE', no=no, date=date, due=due, vendor=vendor,
-                      customer=CUST[c][1], status=status, items=items, amount=money(amt, fmt))
-    open(os.path.join(here, 'html', f.replace('.pdf', '.html')), 'w').write(html)
-    row = {'file': f, 'worker_id': CUST[c][0], 'customer': c, 'invoice_no': no, 'expected_amount': amt, 'status': status, 'items': items, 'format': fmt}
-    if f == 'beta-004.pdf': row['duplicate_of'] = 'beta-003.pdf'
-    manifest.append(row)
-json.dump(manifest, open(os.path.join(here, 'manifest.json'), 'w'), indent=1)
-print(f"wrote {len(manifest)} invoices")
-```
+- [x] **Step 4: Read the printed PDFs back**
 
-- [ ] **Step 4: Run the test, verify it passes**
+Run `coarseRead` from Task 4 over `pdftotext` output for all 14 PDFs (n8n's extractor differs, so this is a layout check, not proof of n8n behavior). Expected: every invoice number, both dates, and the vendor parse; English totals are exact; the German totals read 12.3 and 18.75 (the booth moment). Then complete Task 3 Step 3 against `samples/acme-001.pdf`.
 
-Run: `python3 samples/test_gen.py`
-Expected: `wrote 14 invoices` then `gen ok`.
-
-- [ ] **Step 5: Write `samples/print.sh`** and print the PDFs
-
-```bash
-#!/usr/bin/env bash
-# HTML -> PDF with headless Chrome. beta-004 is copied from beta-003 so the bytes are identical.
-set -euo pipefail
-cd "$(dirname "$0")"
-CHROME=${CHROME:-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}
-for f in html/*.html; do
-  out="$(basename "${f%.html}").pdf"
-  [ "$out" = "beta-004.pdf" ] && continue
-  "$CHROME" --headless --disable-gpu --no-pdf-header-footer --print-to-pdf="$PWD/$out" "file://$PWD/$f" 2>/dev/null
-done
-cp beta-003.pdf beta-004.pdf
-ls -1 *.pdf | wc -l
-shasum -a 256 beta-003.pdf beta-004.pdf
-```
-
-Run: `chmod +x samples/print.sh && samples/print.sh`
-Expected: `14` then two identical SHA-256 lines. Then: `python3 scripts/openrouter_check.py samples/acme-001.pdf` prints fields with `amount` 12300.
-
-- [ ] **Step 6: Commit** (PDFs are committed on purpose: the Form downloads them from the repo's raw URL)
+- [x] **Step 5: Commit**
 
 ```bash
 git add samples/gen.py samples/test_gen.py samples/print.sh samples/manifest.json samples/*.pdf
@@ -560,7 +474,9 @@ Node 7 body (JSON expression):
 ```js
 ={{ JSON.stringify({
   model: $('Config').first().json.OPENROUTER_MODEL, temperature: 0, max_tokens: 300,
-  response_format: { type: 'json_object' },
+  response_format: { type: 'json_schema', json_schema: { name: 'narrative', strict: true, schema: {
+    type: 'object', additionalProperties: false, required: ['narrative'],
+    properties: { narrative: { type: 'string' } } } } },
   messages: [
     { role: 'system', content: 'You write for a manager. Three plain sentences about this customer: what is open, what is overdue, what changed most recently. No bullet points. Return JSON only: {"narrative": "..."}' },
     { role: 'user', content: 'Aggregates: ' + JSON.stringify((({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}) => ({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}))($json.payload)) + '\nInvoices:\n' + $json.payload.invoices.map(i => `${i.invoice_no} | ${i.date} | ${i.amount} EUR | due ${i.due_date} | ${i.status} | ${i.items}`).join('\n') }
@@ -596,7 +512,15 @@ Node 10 body (JSON expression):
 ```js
 ={{ JSON.stringify({
   model: $('Config').first().json.OPENROUTER_MODEL, temperature: 0, max_tokens: 400,
-  response_format: { type: 'json_object' },
+  response_format: { type: 'json_schema', json_schema: { name: 'invoice', strict: true, schema: {
+    type: 'object', additionalProperties: false,
+    required: ['invoice_no', 'date', 'due_date', 'amount', 'vendor', 'customer_name', 'status', 'line_items_summary'],
+    properties: {
+      invoice_no: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD' },
+      due_date: { type: 'string', description: 'YYYY-MM-DD' }, amount: { type: 'number', description: 'total in EUR' },
+      vendor: { type: 'string' }, customer_name: { type: 'string' },
+      status: { type: 'string', enum: ['open', 'paid', 'overdue'] },
+      line_items_summary: { type: 'string', description: 'max 12 words' } } } } },
   plugins: [{ id: 'file-parser', pdf: { engine: $('Config').first().json.PDF_ENGINE } }],
   messages: [
     { role: 'system', content: 'You read one invoice PDF and return JSON only with keys: invoice_no, date (YYYY-MM-DD), due_date (YYYY-MM-DD), amount (number in EUR, no thousands separators), vendor, customer_name, status (one of: open, paid, overdue), line_items_summary (max 12 words).' },

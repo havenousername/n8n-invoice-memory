@@ -1,0 +1,143 @@
+[
+ {
+  "file": "acme-001.pdf",
+  "worker_id": "w_tom",
+  "customer": "acme",
+  "invoice_no": "INV-4711",
+  "expected_amount": 12300.0,
+  "status": "overdue",
+  "items": "Hetzner servers, rack 12, September",
+  "format": "de"
+ },
+ {
+  "file": "acme-002.pdf",
+  "worker_id": "w_tom",
+  "customer": "acme",
+  "invoice_no": "INV-4730",
+  "expected_amount": 4250.0,
+  "status": "open",
+  "items": "Hetzner servers, bandwidth overage",
+  "format": "en"
+ },
+ {
+  "file": "acme-003.pdf",
+  "worker_id": "w_tom",
+  "customer": "acme",
+  "invoice_no": "INV-4750",
+  "expected_amount": 980.0,
+  "status": "open",
+  "items": "IDE licenses, 4 seats",
+  "format": "en"
+ },
+ {
+  "file": "beta-001.pdf",
+  "worker_id": "w_tom",
+  "customer": "beta",
+  "invoice_no": "INV-9001",
+  "expected_amount": 18750.0,
+  "status": "overdue",
+  "items": "consulting, warehouse audit",
+  "format": "de"
+ },
+ {
+  "file": "beta-002.pdf",
+  "worker_id": "w_tom",
+  "customer": "beta",
+  "invoice_no": "INV-9002",
+  "expected_amount": 2100.0,
+  "status": "open",
+  "items": "consulting, follow-up workshop",
+  "format": "en"
+ },
+ {
+  "file": "beta-003.pdf",
+  "worker_id": "w_tom",
+  "customer": "beta",
+  "invoice_no": "INV-9003",
+  "expected_amount": 640.0,
+  "status": "open",
+  "items": "office supplies, pallets",
+  "format": "en"
+ },
+ {
+  "file": "beta-004.pdf",
+  "worker_id": "w_tom",
+  "customer": "beta",
+  "invoice_no": "INV-9003",
+  "expected_amount": 640.0,
+  "status": "open",
+  "items": "office supplies, pallets",
+  "format": "en",
+  "duplicate_of": "beta-003.pdf"
+ },
+ {
+  "file": "gamma-001.pdf",
+  "worker_id": "w_lena",
+  "customer": "gamma",
+  "invoice_no": "INV-2201",
+  "expected_amount": 1500.0,
+  "status": "paid",
+  "items": "Office licenses, annual",
+  "format": "en"
+ },
+ {
+  "file": "gamma-002.pdf",
+  "worker_id": "w_lena",
+  "customer": "gamma",
+  "invoice_no": "INV-2202",
+  "expected_amount": 3200.0,
+  "status": "open",
+  "items": "Azure compute, September",
+  "format": "en"
+ },
+ {
+  "file": "delta-001.pdf",
+  "worker_id": "w_jules",
+  "customer": "delta",
+  "invoice_no": "INV-5100",
+  "expected_amount": 7600.0,
+  "status": "open",
+  "items": "Hetzner servers, store backend",
+  "format": "en"
+ },
+ {
+  "file": "delta-002.pdf",
+  "worker_id": "w_jules",
+  "customer": "delta",
+  "invoice_no": "INV-5101",
+  "expected_amount": 1250.0,
+  "status": "open",
+  "items": "platform fees, September",
+  "format": "en"
+ },
+ {
+  "file": "eps-001.pdf",
+  "worker_id": "w_jules",
+  "customer": "eps",
+  "invoice_no": "INV-3300",
+  "expected_amount": 9800.0,
+  "status": "open",
+  "items": "Creative licenses, 10 seats",
+  "format": "en"
+ },
+ {
+  "file": "eps-002.pdf",
+  "worker_id": "w_jules",
+  "customer": "eps",
+  "invoice_no": "INV-3301",
+  "expected_amount": 450.0,
+  "status": "open",
+  "items": "design subscription",
+  "format": "en"
+ },
+ {
+  "file": "zeta-001.pdf",
+  "worker_id": "w_mia",
+  "customer": "zeta",
+  "invoice_no": "INV-7700",
+  "expected_amount": 5400.0,
+  "status": "paid",
+  "items": "turbine inspection, consulting",
+  "format": "en"
+ }
+]
