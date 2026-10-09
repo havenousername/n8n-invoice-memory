@@ -2,7 +2,7 @@
 
 Booth demo for n8n In The Loop 2026, Ecosystem Day, Berlin, 2026-10-14. Qdrant booth. Complements Clelia's stage talk "Building a Self-Healing Research Agent in n8n" (her loop: feedback → memory; this: events → memory).
 
-Date: 2026-10-09, revised same day (manager tenancy, dashboard surface, search box, phone form, positioning). Owner: Andrei. Build window: 5 days, one person.
+Date: 2026-10-09, revised same day (manager tenancy, dashboard surface, search box, phone form, positioning, Edge stretch). Owner: Andrei. Build window: 5 days, one person.
 
 ## 1. Goal
 
@@ -94,9 +94,14 @@ PUT /collections/customers
     "digest":  {"size": 96,  "distance": "Cosine",
                 "multivector_config": {"comparator": "max_sim"}}
   },
-  "sparse_vectors": {"bm25": {"modifier": "idf"}}
+  "sparse_vectors": {"bm25": {"modifier": "idf"}},
+  "sharding_method": "custom"
 }
+PUT /collections/customers/shards   {"shard_key": "m_anna"}
+PUT /collections/customers/shards   {"shard_key": "m_ben"}
 ```
+
+One shard key per manager. Every upsert, query, scroll, and delete carries `shard_key: <manager_id>`. The payload tenant index stays as well: the shard is the physical unit (what a laptop replicates), the payload filter is the logical guard (what a query can see). If custom sharding is unavailable on the cluster (day-1 gate), drop the two shard lines and everything still works on the payload filter alone; only the Edge stretch loses its "her shard only" property.
 
 Payload indexes:
 
@@ -148,7 +153,7 @@ The search box is the only place vectors run. List, filter, remove, restore are 
 
 ## 5. Workflows
 
-Every workflow starts with an Edit Fields node named `Config`: `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`, `WORKERS` (JSON map `worker_id → {manager_id, name}`), `MANAGERS` (JSON map `manager_id → name`), `SAMPLES_BASE_URL` (raw GitHub URL of `samples/`). Credentials: Qdrant as Header Auth (`api-key`), OpenRouter. No Variables, no community nodes, no Code node npm imports, no filesystem, no hardcoded IDs.
+Every workflow starts with an Edit Fields node named `Config`: `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`, `WORKERS` (JSON map `worker_id → {manager_id, name}`), `MANAGERS` (JSON map `manager_id → name`), `SAMPLES_BASE_URL` (raw GitHub URL of `samples/`). Every Qdrant request body built in a workflow includes `shard_key` = the manager id. Credentials: Qdrant as Header Auth (`api-key`), OpenRouter. No Variables, no community nodes, no Code node npm imports, no filesystem, no hardcoded IDs.
 
 Node names are sentences. Max 12 nodes per canvas, max 4 sticky notes.
 
@@ -196,6 +201,7 @@ Static, one file, no build step, opened from the booth laptop. Config at the top
 - Filter control: one number input "overdue over", applies `overdue_gte`. Cards outside the filter fade out, the rest stay. Label says "payload filter, no similarity".
 - Search box: one text input. Calls `/search`. Matching cards get a highlight ring and show `matched INV-4711 · Hetzner servers` under the amount; the rest dim. Label says "three vectors, one request". Clearing the box restores the grid.
 - Latency badge: every list, filter, and search response shows its `latency_ms` from n8n and the browser round-trip beside it. Numbers, not adjectives. The badge is the only speed claim at the booth.
+- Source switch (Edge stretch only): `Cloud | Local`. Local points the same requests at the laptop sidecar. Auto-falls to Local when three cloud polls fail, shows an `offline · local replica` banner. Remove and Restore are disabled on Local with the label "writes need the cloud".
 - Remove and Restore buttons on each card. Removed cards disappear on the next poll. A small "removed" tray at the bottom lists what the manager can't see, with the `purge_at` date, for the dashboard-cutaway moment.
 - Chime per rung change, muted toggle. Offline banner if three polls fail; last known cards stay.
 
@@ -247,6 +253,7 @@ On the table: QR to the Form (pick a sample invoice, pick a worker), QR to the r
 - 0:42 chime, card snaps sharp, `€12,300.00`, narrative appears. "Vision model finished. Same card, corrected in place. Nobody re-asked."
 - 0:50 Remove Acme. Card gone, in the removed tray with the purge date. Alt-tab to the Qdrant dashboard: point still there, `deleted_at`. Restore. Back.
 - 0:58 "Five workflows, one collection. The request is on the card. Want the JSON?"
+- Edge stretch, only if built, as the closer at 1:00: switch the laptop's wifi off. Badge flips to `2 ms · local`. Same list, same filter, same search. "Her laptop holds a snapshot of her shard. Only hers. Same engine, in-process, no server. Qdrant Edge." Wifi on, next sync pulls the invoice that landed meanwhile, the card blurs and sharpens on its own.
 
 Tie-in, once: "Clelia's agent learns from corrections; this one learns from events. Same collection, same loop."
 
@@ -303,6 +310,25 @@ Speed: no number is claimed. The latency badge shows `latency_ms` on every reque
 
 Anchor for anyone writing copy: composability (primitives at query time), performance via filtrable HNSW and the tenant index, built in-house in Rust. Deployment flexibility (cloud, BYOC, on-prem, edge, air-gapped) goes on the card's back, not in the 60 s.
 
+## 11b. Stretch: Qdrant Edge Replica for the Traveling Manager
+
+Status: stretch. Built on day 4 only if days 1–3 land and the day-1 gate passes. Not on the critical path.
+
+Story: a manager on a train with no signal still gets the overview in milliseconds. The laptop holds a replica of her shard and nothing else. Writes still go to the cloud. This is the documented Edge pattern (immutable Edge Shard restored from one server shard, updated by partial snapshots, tiered multitenancy by shard key), not an invention for the booth.
+
+Pieces:
+- `edge/sidecar.py`: Python, dependencies `qdrant-edge-py` and `fastembed`. On start, downloads the snapshot of shard `m_anna` from the cloud collection, unpacks it into an immutable `EdgeShard`. Every 10 s pulls a partial snapshot and applies it. Serves `GET /customers` and `GET /search` on `localhost:8787` with the same response shape as the n8n endpoints, so the dashboard changes only the base URL. Search embeds the query locally: FastEmbed `all-MiniLM-L6-v2` for `summary`, FastEmbed BM25 for `bm25`, FastEmbed ColBERT small for `digest`; same models as Cloud Inference, so cloud-written vectors and local query vectors match. Runs the same prefetch, RRF, and formula as section 11 on the shard.
+- Dashboard: source switch and offline banner (section 6).
+- Cloud side: nothing new beyond the shard keys from section 4.4.
+
+What the audience sees: wifi off, dashboard keeps answering, badge reads `2 ms · local`. Wifi on, the next partial snapshot brings in whatever landed meanwhile.
+
+Honest limits, said on the card: Edge is in beta. Remove and Restore need the cloud. The replica lags by the sync interval. Soft-deleted customers replicate with `deleted_at` and stay hidden by the same filter; purges arrive with the next snapshot.
+
+Day-1 gate (one hour, in `qdrant/smoke.sh --edge`): custom sharding accepted on the Cloud cluster; shard snapshot downloadable by shard key; `qdrant-edge-py` installs and unpacks it; one partial snapshot round-trip works. If partial snapshots are unavailable on the cluster version, the sidecar re-downloads the full shard snapshot each cycle; the data is kilobytes. If custom sharding is unavailable, the stretch is cut: replicating the whole collection to a laptop contradicts the tenancy story.
+
+Cost: about 10 h. Positioning anchor: Deployment on Your Terms, same composable engine from cloud to the device.
+
 ## 12. Repo
 
 ```
@@ -313,6 +339,7 @@ n8n-invoice-memory/
   workflows/01-ingest.json … 05-purge.json
   dashboard/index.html
   samples/gen.py, print.sh, *.pdf
+  edge/sidecar.py, edge/requirements.txt   (stretch)
   booth/script.md, booth/cards.md
   docs/superpowers/specs/
 ```
@@ -334,11 +361,12 @@ Answer to "why not the Qdrant Vector Store node": "Right default for one-vector-
 ## 13. Verification
 
 Day-1 checks, each can change the plan:
-- `qdrant/smoke.sh` passes: inference models accepted in upsert (`summary`, `digest` as multivector, `bm25`), nested filter on `invoices[]` returns the seeded point, the section 11 request returns it with inference inside `prefetch` and the formula on the indexed datetime.
+- `qdrant/smoke.sh` passes: custom sharding and shard keys accepted, inference models accepted in upsert (`summary`, `digest` as multivector, `bm25`), nested filter on `invoices[]` returns the seeded point, the section 11 request returns it with inference inside `prefetch` and the formula on the indexed datetime.
 - Pinned OpenRouter model accepts PDF file input and `response_format` JSON. Selection rule: cheapest mid-tier model on openrouter.ai/models that lists both; if none, stage 2 reads extracted text instead of the PDF and the "visual" claim is dropped.
 - Data Tables available on the n8n Cloud plan in use. Fallback: Google Sheets with the same columns.
 - Execute Sub-workflow with wait off returns the Form Ending in under 2 s.
 - `GET /customers` under 300 ms and `GET /search` under 500 ms with the full sample corpus.
+- Edge gate (`smoke.sh --edge`, section 11b) passes or the stretch is cut on day 1, not day 4.
 
 Per-workflow test matrix: every If branch and every webhook path run once with real data, screenshot of the dashboard for each. Full 60 s rehearsal three times on day 5, timed.
 
@@ -346,13 +374,13 @@ One runnable check in the repo: `qdrant/smoke.sh`. Fails if inference, nested fi
 
 ## 14. Build order and cuts
 
-Order: smoke.sh → collection → 03 Rebuild → 01 + 02 → samples → 04 list endpoint → dashboard page → 04 search + search box → 04 remove/restore → 05 → cards + README → rehearsal + recording.
+Order: smoke.sh (incl. Edge gate) → collection → 03 Rebuild → 01 + 02 → samples → 04 list endpoint → dashboard page → 04 search + search box → 04 remove/restore → 05 → cards + README → [day 4: Edge sidecar + source switch] → rehearsal + recording.
 
-Rough 45 h. Cuts in order if slipping: attract loop, paper tray, chime, matched-line highlight (keep the card ring), narrative stage, restore moment. Not cut: the search box, it's the vector beat.
+Rough 45 h core, 55 h with the Edge stretch. Cuts in order if slipping: Edge stretch, attract loop, paper tray, chime, matched-line highlight (keep the card ring), narrative stage, restore moment. Not cut: the search box, it's the vector beat.
 
 ## 15. Assumptions
 
-- Qdrant Cloud cluster has Inference enabled and the three free hosted models listed above.
+- Qdrant Cloud cluster has Inference enabled and the three free hosted models listed above, and accepts custom sharding on a single node.
 - n8n Cloud plan has Data Tables (built-in, 200 MiB per instance, kilobytes used here) and allows Execute Sub-workflow without waiting.
 - Booth wifi works; phone hotspot as backup.
 - Nobody at the booth uploads a real invoice. Form page says "synthetic data only".
