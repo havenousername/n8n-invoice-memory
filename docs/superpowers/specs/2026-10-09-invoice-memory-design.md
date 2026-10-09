@@ -2,7 +2,7 @@
 
 Booth demo for n8n In The Loop 2026, Ecosystem Day, Berlin, 2026-10-14. Qdrant booth. Complements Clelia's stage talk "Building a Self-Healing Research Agent in n8n" (her loop: feedback → memory; this: events → memory).
 
-Date: 2026-10-09, revised same day (manager tenancy, dashboard surface). Owner: Andrei. Build window: 5 days, one person.
+Date: 2026-10-09, revised same day (manager tenancy, dashboard surface, search box, phone form, positioning). Owner: Andrei. Build window: 5 days, one person.
 
 ## 1. Goal
 
@@ -12,7 +12,8 @@ Audience: n8n builders. Not vector-DB experts. 60–90 s attention at a booth. T
 
 Success at the booth:
 - A passer-by understands "it answers before it finished reading" from the aisle screen with no words.
-- Four moments land in 60 s: card goes rough with "2 processing" and a wrong amount, overdue filter returns two customers with no similarity involved, switching manager hides a customer, remove → Qdrant dashboard still shows the point with `deleted_at`, restore brings it back. The card sharpening and the amount correcting itself happen underneath, on their own.
+- Six beats land in 60 s: a visitor's phone makes a card go rough with "1 processing" and a wrong amount, search "servers" lights up the customers whose invoices mention servers with the matched line, overdue filter returns two customers with no similarity involved, switching manager hides a customer, the card sharpens and the amount corrects itself on its own, remove → Qdrant dashboard still shows the point with `deleted_at`, restore brings it back.
+- Someone who asks "why Qdrant" gets one request body to read, not a claim to trust.
 - A builder scans the QR and the import works on their n8n Cloud without edits beyond two credentials.
 
 ## 2. Non-goals, killed on purpose
@@ -21,19 +22,20 @@ Success at the booth:
 - CLIP or any visual embedding. "Visual" = a vision LLM reads the PDF and extracts fields.
 - ColPali. Not on Cloud Inference.
 - Chat interface. Managers don't chat with invoices. The dashboard is the manager surface.
-- Free-text search. The dashboard offers a filter control, not a search box.
 - Per-customer queue or locking. Rebuild-from-log converges; flicker is acceptable.
 - Anonymize-at-7-days as a live step. README line only.
 - Real identity. Manager comes from a tab on the dashboard. Worker comes from a Form dropdown.
+- File upload at the booth. The public Form picks from sample invoices; nobody can upload a real one.
+- Competitor tables. Positioning is one request the audience can read, not a feature matrix.
 - Attract loop and paper tray: optional extras, built only if hours remain.
 
 ## 3. Architecture
 
 ```
-worker ──Form──▶ 01 Ingest ──async──▶ 02 Process ──▶ 03 Rebuild point ──▶ Qdrant `customers`
-                                      (stages 0,1,2,3)      ▲                     │
-manager ─browser─▶ dashboard/index.html ─GET/POST─▶ 04 Dashboard API ─────────────┘
-cron ──────────▶ 05 Purge                      (list, filter, remove, restore)
+visitor phone ─QR─▶ Form ─▶ 01 Ingest ──async──▶ 02 Process ──▶ 03 Rebuild point ──▶ Qdrant `customers`
+                                                  (stages 0,1,2,3)      ▲                     │
+manager ─browser─▶ dashboard/index.html ─GET/POST─▶ 04 Dashboard API ──┘ ─────────────────────┘
+cron ──────────▶ 05 Purge                      (list, filter, search, remove, restore)
                  n8n Data Tables: `invoices` (append-only log), `customers`
 ```
 
@@ -142,17 +144,19 @@ Field values come from `llm_fields` when the invoice's stage ≥ 2, else `regex_
 
 Rungs, used by the card ladder: rung 1 = `stage` 1 (coarse), rung 2 = `stage` 2 (sharp), rung 3 = `summary_stage` 3 (narrative). `stage` 0 shows as "received", blur 14px. Badge text: `rung <n>/3 · <pending_count> of <invoice_count> processing`.
 
-The dashboard never needs vector search. The vectors exist so the same point answers free-text questions in a follow-up (README shows the hybrid query body); at the booth they are the "one point, three representations" sentence.
+The search box is the only place vectors run. List, filter, remove, restore are payload operations. That split is said out loud at the booth: "everything you saw until now was filters; this one is three vectors fused."
 
 ## 5. Workflows
 
-Every workflow starts with an Edit Fields node named `Config`: `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`, `WORKERS` (JSON map `worker_id → {manager_id, name}`), `MANAGERS` (JSON map `manager_id → name`). Credentials: Qdrant as Header Auth (`api-key`), OpenRouter. No Variables, no community nodes, no Code node npm imports, no filesystem, no hardcoded IDs.
+Every workflow starts with an Edit Fields node named `Config`: `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`, `WORKERS` (JSON map `worker_id → {manager_id, name}`), `MANAGERS` (JSON map `manager_id → name`), `SAMPLES_BASE_URL` (raw GitHub URL of `samples/`). Credentials: Qdrant as Header Auth (`api-key`), OpenRouter. No Variables, no community nodes, no Code node npm imports, no filesystem, no hardcoded IDs.
 
 Node names are sentences. Max 12 nodes per canvas, max 4 sticky notes.
 
 ### 01 Ingest
 
-Form Trigger (fields: PDF file, worker dropdown) → Config → Code `Hash the PDF, resolve the manager` → Data Table `Seen this hash before?` (get rows by pdf_hash) → If duplicate → Form Ending "Duplicate of INV-4711, nothing to do" / else → Data Table `Upsert customer row` → Data Table `Append invoice row (stage 0)` → Execute Sub-workflow `Process in the background` (02, **Wait for Sub-Workflow Completion: off**) → Form Ending "Received. Watch the dashboard."
+Form Trigger (fields: sample invoice dropdown, worker dropdown; no file field) → Config → HTTP Request `Download the chosen sample` (`SAMPLES_BASE_URL/<file>`) → Code `Hash the PDF, resolve the manager` → Data Table `Seen this hash before?` (get rows by pdf_hash) → If duplicate → Form Ending "Duplicate of INV-4711, nothing to do" / else → Data Table `Upsert customer row` → Data Table `Append invoice row (stage 0)` → Execute Sub-workflow `Process in the background` (02, **Wait for Sub-Workflow Completion: off**) → Form Ending "Received. Watch the dashboard."
+
+The Form URL is the QR code on the table. Visitors trigger ingest from their phone. README: to accept real uploads, add a File field and delete the download node.
 
 ### 02 Process (sub-workflow)
 
@@ -171,10 +175,11 @@ Idempotent. Any stage, any retry, any order produces the same point for the same
 One workflow, three Webhook triggers, each path ends in Respond to Webhook. No auth; synthetic data only, booth laptop only.
 
 - `GET /customers?manager=m_x[&overdue_gte=10000]`: Config → HTTP Request `Scroll this manager's customers` (filter: `manager_id` match, `is_empty deleted_at`; when `overdue_gte` present add `nested: {key: invoices, filter: {status match overdue, amount gte}}`; `order_by last_invoice_at desc`; limit 50; with payload) → Code `Shape cards` → Respond. Returns `[{customer_id, name, worker, stage, rung, pending_count, invoice_count, open_amount, overdue_count, latest, narrative, deleted_at}]`.
+- `GET /search?manager=m_x&q=servers`: Config → HTTP Request `Search three vectors in one request` (the body in section 11, tenant filter repeated inside every prefetch so isolation happens at candidate generation, not after) → Code `Pick the matched line` (token overlap between `q` and each `invoices[]` digest line of the returned customers; `ponytail:` MaxSim doesn't report which vector won, overlap is the cheap stand-in) → Respond `[{customer_id, score, matched_line, latency_ms}]`.
 - `POST /customers/remove` `{manager, customer}`: Config → Data Table `Set deleted_at` → Execute Sub-workflow `Rebuild point` → Respond `{ok, purge_at}`.
 - `POST /customers/restore` `{manager, customer}`: Config → Data Table `Clear deleted_at` → Execute Sub-workflow `Rebuild point` → Respond `{ok}`.
 
-The list query always carries `manager_id` match. There is no endpoint that lists across managers. Response time target: under 300 ms for 10 customers.
+Every query carries `manager_id` match. There is no endpoint that reads across managers. Response time targets: list under 300 ms, search under 500 ms including three inference calls, for 10 customers. Each response includes `latency_ms` measured in n8n around the Qdrant call.
 
 ### 05 Purge
 
@@ -189,6 +194,8 @@ Static, one file, no build step, opened from the booth laptop. Config at the top
 - Blur per card from `stage`: 14px at 0, 5px at 1, 0 at 2. Rung 3 reveals the narrative. Timer per rung frozen at the moment the rung lit.
 - Polls `GET /customers` every 2 s. Diffs by `customer_id`; a card whose `stage` dropped goes blurry again. The amount text updates in place, so `€12.30` becomes `€12,300.00` under the viewer's eyes.
 - Filter control: one number input "overdue over", applies `overdue_gte`. Cards outside the filter fade out, the rest stay. Label says "payload filter, no similarity".
+- Search box: one text input. Calls `/search`. Matching cards get a highlight ring and show `matched INV-4711 · Hetzner servers` under the amount; the rest dim. Label says "three vectors, one request". Clearing the box restores the grid.
+- Latency badge: every list, filter, and search response shows its `latency_ms` from n8n and the browser round-trip beside it. Numbers, not adjectives. The badge is the only speed claim at the booth.
 - Remove and Restore buttons on each card. Removed cards disappear on the next poll. A small "removed" tray at the bottom lists what the manager can't see, with the `purge_at` date, for the dashboard-cutaway moment.
 - Chime per rung change, muted toggle. Offline banner if three polls fail; last known cards stay.
 
@@ -196,7 +203,7 @@ Both screens show this page. Aisle-facing: manager A tab, no mouse. Presenter-si
 
 ## 7. Synthetic data
 
-`samples/`: 2 managers, 4 workers, 6 customers, 14 invoice PDFs. Fake companies, fake addresses, EUR. Two invoices use German number format (`12.300,00 €`) so the coarse stage is visibly wrong. One pair is a byte-identical duplicate for the "that's INV-4711 again" moment. Statuses mixed so the overdue filter returns 2 of 6.
+`samples/`: 2 managers, 4 workers, 6 customers, 14 invoice PDFs. Fake companies, fake addresses, EUR. Two invoices use German number format (`12.300,00 €`) so the coarse stage is visibly wrong. One pair is a byte-identical duplicate for the "that's INV-4711 again" moment. Statuses mixed so the overdue filter returns 2 of 6. Line items chosen so three search terms each hit one or two customers and no others: servers, consulting, licenses.
 
 Generation: `samples/gen.py` (stdlib only) writes HTML invoices; `samples/print.sh` prints them to PDF with headless Chrome. No pip.
 
@@ -229,20 +236,74 @@ Nothing is swallowed. Failed executions stay visible in n8n.
 
 Hook, spoken to the aisle: "It answers before it's finished reading. Watch it sharpen."
 
+On the table: QR to the Form (pick a sample invoice, pick a worker), QR to the repo, printed cards (section 11).
+
 60-second script:
-- 0:00 hook, drop the PDF in the Form, point at the card going blurry.
-- 0:08 card: `INV-4711 · €12.30 · rough · 1 of 13 processing`. "That's regex. It's wrong. It's two seconds old. The manager already has it."
-- 0:18 type 10000 in "overdue over". Two cards stay. "No vectors. Nested filter on the invoices inside the point."
-- 0:28 click the other manager's tab. Acme is gone. "Same collection. One filter on `manager_id`. Tenancy is a payload field."
-- 0:38 chime, card snaps sharp, `€12,300.00`, then narrative appears. "Vision model finished. Same card, corrected in place. Nobody re-asked."
-- 0:48 Remove Acme. Card gone, appears in the removed tray with the purge date. Alt-tab to the Qdrant dashboard: point still there, `deleted_at`. Restore. Back.
-- 0:58 "Four workflows, one collection. Want the JSON?"
+- 0:00 hook. "Scan that, pick an invoice." Visitor's phone submits. Card goes blurry.
+- 0:08 card: `INV-4711 · €12.30 · rough · 1 of 13 processing`. "Regex. Wrong. Two seconds old. The manager already has it."
+- 0:16 type "servers" in search. Two cards light up with `matched INV-4711 · Hetzner servers`. "Three vectors fused in one request: keywords, invoice lines, summary. Latency's on the badge."
+- 0:26 clear search, type 10000 in "overdue over". Two cards stay. "No vectors. Nested filter on the invoices inside the point."
+- 0:34 click the other manager's tab. Acme is gone. "Same collection. One filter on `manager_id`. Tenancy is a payload field, the index knows it."
+- 0:42 chime, card snaps sharp, `€12,300.00`, narrative appears. "Vision model finished. Same card, corrected in place. Nobody re-asked."
+- 0:50 Remove Acme. Card gone, in the removed tray with the purge date. Alt-tab to the Qdrant dashboard: point still there, `deleted_at`. Restore. Back.
+- 0:58 "Five workflows, one collection. The request is on the card. Want the JSON?"
 
 Tie-in, once: "Clelia's agent learns from corrections; this one learns from events. Same collection, same loop."
 
 Insurance: full flow recorded on day 5, bound to one key.
 
-## 11. Repo
+## 11. Why Qdrant, Specifically
+
+House rule: never say "only Qdrant can do this". Say "in one request" and hand them the request. Composable means retrieval primitives combined at query time; this demo's proof is that the search box is one body. Competitors are not named on cards or in the README. If a visitor names one, answer with the capability, not the vendor.
+
+The exhibit, printed on an A5 card and in the README under "Eight Primitives, One Request":
+
+```json
+POST /collections/customers/points/query
+{
+  "prefetch": {
+    "prefetch": [
+      {"query": {"nearest": {"text": "servers", "model": "qdrant/bm25"}},
+       "using": "bm25", "limit": 20, "filter": {"must": [
+         {"key": "manager_id", "match": {"value": "m_anna"}},
+         {"is_empty": {"key": "deleted_at"}}]}},
+      {"query": {"nearest": {"text": "servers", "model": "answerdotai/answerai-colbert-small-v1"}},
+       "using": "digest", "limit": 20, "filter": {"...same..."}},
+      {"query": {"nearest": {"text": "servers", "model": "sentence-transformers/all-minilm-l6-v2"}},
+       "using": "summary", "limit": 20, "filter": {"...same..."}}
+    ],
+    "query": {"rrf": {}},
+    "limit": 20
+  },
+  "query": {"formula": {"sum": ["$score", {"mult": [0.1,
+    {"exp_decay": {"x": {"datetime_key": "last_invoice_at"},
+                   "target": {"datetime": "2026-10-14T00:00:00Z"},
+                   "scale": 2592000, "midpoint": 0.5}}]}]}},
+  "limit": 5,
+  "with_payload": true
+}
+```
+
+Count, printed under it:
+
+| # | primitive | what it replaces in your workflow |
+|---|---|---|
+| 1 | tenant filter on an `is_tenant` index | a Switch node routing to one collection per manager |
+| 2 | `is_empty` on `deleted_at` | a second "deleted customers" list you have to subtract |
+| 3 | sparse BM25 vector | an Elastic index next to your vector store |
+| 4 | ColBERT multivector, MaxSim | one point per invoice and a dedupe-by-customer Code node |
+| 5 | dense summary vector | the thing you already have |
+| 6 | server-side inference, three models | three embedding nodes and their API keys |
+| 7 | RRF fusion | a Merge node and a Sort node |
+| 8 | formula with datetime decay | a Sort node after fetching everything |
+
+Plus, outside this request: nested filter on `invoices[]` (the overdue control), delete by filter (purge), full upsert with inference (rebuild).
+
+Speed: no number is claimed. The latency badge shows `latency_ms` on every request, measured in n8n around the Qdrant call, with the browser round-trip beside it. If someone asks "is it fast", point at the badge. The tenant index is why the filtered list stays flat as customers grow; say that as a mechanism, not a benchmark.
+
+Anchor for anyone writing copy: composability (primitives at query time), performance via filtrable HNSW and the tenant index, built in-house in Rust. Deployment flexibility (cloud, BYOC, on-prem, edge, air-gapped) goes on the card's back, not in the 60 s.
+
+## 12. Repo
 
 ```
 n8n-invoice-memory/
@@ -256,11 +317,11 @@ n8n-invoice-memory/
   docs/superpowers/specs/
 ```
 
-README hook: "Upload an invoice PDF. Two seconds later the manager's dashboard has an answer. A worse answer, then a better one, then a summary."
+README hook: "Pick an invoice PDF. Two seconds later the manager's dashboard has an answer. A worse answer, then a better one, then a summary." Second section of the README is "Eight Primitives, One Request" with the body from section 11.
 
 Setup: (1) free Qdrant Cloud cluster, run `qdrant/setup.sh`; (2) two credentials; (3) import the JSONs, open the `Start here` sticky, edit the worker map, upload a sample, open `dashboard/index.html` with your n8n URL. Triggers ship with pinned data so an opened workflow shows items before any credential exists.
 
-Feature one-liners (README and cards, presenter speaks two):
+Printed cards: A5 "Eight Primitives, One Request" (request on the front, table on the back), two manager name cards, the QR card. Feature one-liners (README and the card's back, presenter speaks two):
 - Tenant index: one collection, no Switch node routing to five credentials.
 - Nested filter: match a customer by one invoice's fields without pulling 400 invoices into a Code node.
 - Multivector: one point per customer that still matches a single invoice line.
@@ -270,26 +331,26 @@ Feature one-liners (README and cards, presenter speaks two):
 
 Answer to "why not the Qdrant Vector Store node": "Right default for one-vector-per-chunk RAG. This needs three named vectors on one point, nested filters and server-side embedding, which is a REST body, so it's one HTTP Request with the same credential."
 
-## 12. Verification
+## 13. Verification
 
 Day-1 checks, each can change the plan:
-- `qdrant/smoke.sh` passes: inference models accepted in upsert (`summary`, `digest` as multivector, `bm25`), nested filter on `invoices[]` returns the seeded point, formula with `datetime_key` works on the indexed field.
+- `qdrant/smoke.sh` passes: inference models accepted in upsert (`summary`, `digest` as multivector, `bm25`), nested filter on `invoices[]` returns the seeded point, the section 11 request returns it with inference inside `prefetch` and the formula on the indexed datetime.
 - Pinned OpenRouter model accepts PDF file input and `response_format` JSON. Selection rule: cheapest mid-tier model on openrouter.ai/models that lists both; if none, stage 2 reads extracted text instead of the PDF and the "visual" claim is dropped.
 - Data Tables available on the n8n Cloud plan in use. Fallback: Google Sheets with the same columns.
 - Execute Sub-workflow with wait off returns the Form Ending in under 2 s.
-- `GET /customers` under 300 ms with the full sample corpus.
+- `GET /customers` under 300 ms and `GET /search` under 500 ms with the full sample corpus.
 
 Per-workflow test matrix: every If branch and every webhook path run once with real data, screenshot of the dashboard for each. Full 60 s rehearsal three times on day 5, timed.
 
-One runnable check in the repo: `qdrant/smoke.sh`. Fails if inference, nested filter, formula, or collection config break.
+One runnable check in the repo: `qdrant/smoke.sh`. Fails if inference, nested filter, the section 11 request, or collection config break.
 
-## 13. Build order and cuts
+## 14. Build order and cuts
 
-Order: smoke.sh → collection → 03 Rebuild → 01 + 02 → samples → 04 list endpoint → dashboard page → 04 remove/restore → 05 → README → rehearsal + recording.
+Order: smoke.sh → collection → 03 Rebuild → 01 + 02 → samples → 04 list endpoint → dashboard page → 04 search + search box → 04 remove/restore → 05 → cards + README → rehearsal + recording.
 
-Rough 40 h. Cuts in order if slipping: attract loop, paper tray, chime, narrative stage, ColBERT `digest` (fall back to `summary` + `bm25`), restore moment.
+Rough 45 h. Cuts in order if slipping: attract loop, paper tray, chime, matched-line highlight (keep the card ring), narrative stage, restore moment. Not cut: the search box, it's the vector beat.
 
-## 14. Assumptions
+## 15. Assumptions
 
 - Qdrant Cloud cluster has Inference enabled and the three free hosted models listed above.
 - n8n Cloud plan has Data Tables (built-in, 200 MiB per instance, kilobytes used here) and allows Execute Sub-workflow without waiting.
