@@ -55,7 +55,7 @@ Every Python file under `scripts/` follows these rules; review rejects a script 
 ## Review Focus
 
 1. A PDF whose text extraction is empty (scanned image) must still yield a point: stage 1, amount `null`, digest line with `?`, aggregates exclude it, no crash. Pinned in Task 4 (`view.test.js`, "empty regex fields").
-2. The vision model returning `amount` as a formatted string (`"12.300,00 €"` or `"4,250.00"`) must coerce to a number, never reach aggregates as `NaN`. Pinned in Task 4 (`validate.test.js`, "german string amount").
+2. The vision model returning `amount` as a formatted string (`"12.300,00 €"` or `"4,250.00"`) must coerce to a number, never reach aggregates as `NaN`. Pinned in Task 4 (`validate.test.js`, "german string amount" and "a lone separator before three digits").
 3. The same customer slug under two managers must produce two different points and two different Data Table rows. Pinned in Task 4 (`ids.test.js`) and Task 6 (two seeded managers).
 4. A card whose `stage` drops after a new PDF must re-blur, and a changed `latest.amount` must re-render in place. Pinned in Task 9 (`app.test.js`, "stage drop re-blurs").
 5. A search with no matches must return an empty list and the dashboard must show "no matches" without dimming every card. Pinned in Task 8 (search returns `[]`) and Task 9 (`app.test.js`, "empty search").
@@ -257,295 +257,42 @@ git commit -m "test(openrouter): PDF input and JSON mode gate for the pinned mod
 ### Task 4: Code-Node Sources with Node Tests
 
 **Files:**
-- Create: `workflows/code/ids.js`, `coarse.js`, `validate.js`, `view.js`, `cards.js`, `match.js`, and one `*.test.js` beside each
+- Create: `workflows/code/ids.js`, `coarse.js`, `validate.js`, `view.js`, `cards.js`, `match.js`, one `*.test.js` beside each, and `paste.test.js`
 - Test: `node --test workflows/code/*.test.js`
 
-**Interfaces:**
-- Produces, as CommonJS exports (the n8n Code nodes paste the function body and call it; see each later task):
-  - `uuidFromHex(hex: string): string`
-  - `resolveUpload(sampleFile: string, workerId: string, workers: Record<string,{manager_id:string,name:string}>): {customer_id, worker_id, manager_id}`
-  - `coarseRead(text: string): {invoice_no, date, due_date, amount: number|null, vendor}`
-  - `toNumber(v: unknown): number` and `validateFields(obj): {invoice_no, date, due_date, amount: number, vendor, customer_name, status, line_items_summary}` (throws on bad input)
-  - `computeView(customer: Row, invoices: Row[], nowIso: string): {payload: object, texts: {summary, digest, bm25}}`
-  - `shapeCards(points: {payload}[], workers): Card[]` and `splitRemoved(cards): {cards, removed}`
-  - `pickMatchedLine(q: string, invoices: object[]): string|null`
+**Interfaces** (CommonJS exports for the tests; each n8n Code node pastes the file without its `module.exports` line and calls the function):
+- `ids.js`: `uuidFromHex(hex: string): string` throws unless given at least 32 hex characters; `resolveUpload(sampleFile, workerId, workers): {customer_id, worker_id, manager_id}` throws `no customer slug` or `unknown worker` (own keys only)
+- `coarse.js`: `coarseRead(text): {invoice_no, date, due_date, amount: number|null, vendor}`, deliberately wrong on German number format
+- `validate.js`: `toNumber(v): number` (the later of `,` and `.` is the decimal point; a lone separator before exactly three digits, or a repeated one, is a thousands separator; nothing numeric is `NaN`, never 0); `validateFields(obj)` returns exactly the eight contract fields with a numeric `amount` and a lowercased `status`, and throws on a missing field, nonnumeric amount, unknown status, or non-ISO date
+- `view.js`: `computeView(customer, invoiceRows, nowIso): {payload, texts: {summary, digest, bm25}}`; `payload.source_revision` fingerprints the rows and a narrative is used only when its revision matches, every invoice is sharp, and none is pending
+- `cards.js`: `shapeCards(points, workers): Card[]` and `splitRemoved(cards): {cards, removed}` with `purge_at` 30 days after `deleted_at`
+- `match.js`: `pickMatchedLine(q, invoices): string|null`
 
-- [ ] **Step 1: Write the tests first** (`workflows/code/*.test.js`, Node's built-in runner)
+The sources live only in the repo; the tests below are the contract.
 
-```js
-// workflows/code/ids.test.js
-const test = require('node:test'); const assert = require('node:assert');
-const { uuidFromHex, resolveUpload } = require('./ids');
-test('uuid shape and determinism', () => {
-  const h = 'a'.repeat(64);
-  const u = uuidFromHex(h);
-  assert.match(u, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
-  assert.equal(u, uuidFromHex(h));
-  assert.notEqual(u, uuidFromHex('b'.repeat(64)));
-});
-test('resolveUpload derives slug and manager', () => {
-  const w = { w_tom: { manager_id: 'm_anna', name: 'Tom' } };
-  assert.deepEqual(resolveUpload('Acme-001.pdf', 'w_tom', w), { customer_id: 'acme', worker_id: 'w_tom', manager_id: 'm_anna' });
-  assert.throws(() => resolveUpload('acme-001.pdf', 'w_nobody', w), /unknown worker/);
-});
-```
+- [x] **Step 1: Write the tests first**
 
-```js
-// workflows/code/coarse.test.js
-const test = require('node:test'); const assert = require('node:assert');
-const { coarseRead } = require('./coarse');
-const EN = 'INVOICE\nInvoice No: INV-4711\nDate: 2026-10-01\nDue date: 2026-10-15\nFrom: Hetzner Online GmbH\n...\nTotal: 4,250.00 EUR';
-const DE = 'RECHNUNG\nInvoice No: INV-4712\nDate: 2026-10-02\nDue date: 2026-10-16\nFrom: Hetzner Online GmbH\nTotal: 12.300,00 €';
-test('english format parses correctly', () => {
-  const r = coarseRead(EN);
-  assert.equal(r.invoice_no, 'INV-4711'); assert.equal(r.date, '2026-10-01'); assert.equal(r.due_date, '2026-10-15');
-  assert.equal(r.amount, 4250); assert.equal(r.vendor, 'Hetzner Online GmbH');
-});
-test('german format is deliberately wrong (the booth moment)', () => {
-  assert.equal(coarseRead(DE).amount, 12.3);
-});
-test('empty text yields nulls, not a throw', () => {
-  assert.deepEqual(coarseRead(''), { invoice_no: null, date: null, due_date: null, amount: null, vendor: null });
-});
-```
+- `ids.test.js`: UUID shape (version 4, variant 8), determinism, different input gives a different id; short, non-hex, and missing input throw; slug and manager from `Acme-001.pdf`; unknown worker and a file with no slug throw.
+- `coarse.test.js`: the English sample parses every field; the German total reads as 12.3 (the booth moment); empty or missing text gives all nulls.
+- `validate.test.js`: `12.300,00 €` and `4,250.00`; `12,300`, `12.300`, and `12,300 EUR` are 12300; `12.5`, `12,5`, and `-3,50` keep decimals; `1.234.567,89`, `1,234,567.89`, and `1,234,567`; empty, null, and words are `NaN`; summary trimmed to 120; extra model keys dropped; ` Overdue ` normalized; bad status, missing vendor, nonnumeric amount, and a non-ISO due date throw.
+- `view.test.js`: coarse rows use regex fields and sharp rows use LLM fields, with stage, pending, counts, open and overdue sums, `latest` (with `id`), `last_invoice_at`, and the digest line; empty regex fields still yield a point (Review Focus 1); an error row counts as coarse, not pending; a fresh narrative is used and stale, late, or changed-row narratives are not; the revision ignores row order; `deleted_at` is carried; zero rows give an empty valid view.
+- `cards.test.js`: rung 3 with a fresh narrative, rung follows stage otherwise, unknown worker falls back to its id, `latest.id` survives, `purge_at` is 30 days on.
+- `match.test.js`: best overlapping line, no overlap, missing invoices, short tokens ignored.
+- `paste.test.js`: each file, with `module.exports` removed, runs in a bare `vm` context with no `require` and defines its functions; all six pasted into one context do not clash.
 
-```js
-// workflows/code/validate.test.js
-const test = require('node:test'); const assert = require('node:assert');
-const { toNumber, validateFields } = require('./validate');
-const base = { invoice_no: 'INV-1', date: '2026-10-01', due_date: '2026-10-15', amount: 100, vendor: 'X', customer_name: 'Acme GmbH', status: 'open', line_items_summary: 'servers' };
-test('german string amount coerces', () => { assert.equal(toNumber('12.300,00 €'), 12300); assert.equal(toNumber('4,250.00'), 4250); assert.equal(toNumber(7), 7); });
-test('valid passes and trims summary', () => { const v = validateFields({ ...base, line_items_summary: 'x'.repeat(200) }); assert.equal(v.line_items_summary.length, 120); });
-test('bad status throws', () => assert.throws(() => validateFields({ ...base, status: 'late' }), /bad status/));
-test('missing key throws', () => assert.throws(() => validateFields({ ...base, vendor: '' }), /missing vendor/));
-test('non numeric amount throws', () => assert.throws(() => validateFields({ ...base, amount: 'lots' }), /amount/));
-```
-
-```js
-// workflows/code/view.test.js
-const test = require('node:test'); const assert = require('node:assert');
-const { computeView } = require('./view');
-const NOW = '2026-10-09T10:00:00Z';
-const cust = { customer_id: 'acme', worker_id: 'w_tom', manager_id: 'm_anna', name: 'Acme GmbH', deleted_at: '', narrative: '', narrative_at: '' };
-const row = (o) => ({ invoice_id: 'inv_1', stage: 1, regex_fields: '{}', llm_fields: '{}', error: '', text: 'some text', received_at: '2026-10-08T09:00:00Z', ...o });
-test('coarse row uses regex fields; sharp row uses llm fields', () => {
-  const a = row({ invoice_id: 'a', stage: 1, regex_fields: JSON.stringify({ invoice_no: 'INV-1', amount: 12.3, status: 'open' }) });
-  const b = row({ invoice_id: 'b', stage: 2, received_at: '2026-10-09T09:00:00Z', regex_fields: JSON.stringify({ amount: 1 }), llm_fields: JSON.stringify({ invoice_no: 'INV-2', amount: 12300, status: 'overdue', line_items_summary: 'servers' }) });
-  const { payload, texts } = computeView(cust, [a, b], NOW);
-  assert.equal(payload.stage, 1); assert.equal(payload.pending_count, 1); assert.equal(payload.invoice_count, 2);
-  assert.equal(payload.overdue_count, 1); assert.equal(payload.overdue_amount, 12300); assert.equal(payload.open_amount, 12312.3);
-  assert.deepEqual(payload.latest, { id: 'b', invoice_no: 'INV-2', amount: 12300, stage: 2 });
-  assert.equal(payload.last_invoice_at, '2026-10-09T09:00:00Z');
-  assert.equal(payload.summary_stage, 1); assert.ok(!('deleted_at' in payload));
-  assert.match(texts.digest, /INV-2 \| \? \| 12300\.00 EUR \| due \? \| overdue \| servers/);
-  assert.equal(payload.invoices[1].items, 'servers');
-});
-test('empty regex fields still produce a point', () => {
-  const { payload, texts } = computeView(cust, [row({ regex_fields: '{}' })], NOW);
-  assert.equal(payload.stage, 1); assert.equal(payload.latest.amount, null); assert.equal(payload.open_amount, 0);
-  assert.match(texts.digest, /^\? \| \? \| \? EUR/);
-});
-test('error row counts as coarse, not pending', () => {
-  const { payload } = computeView(cust, [row({ stage: -1, error: 'timeout' })], NOW);
-  assert.equal(payload.stage, 1); assert.equal(payload.pending_count, 0);
-});
-test('fresh narrative is used, stale narrative is not', () => {
-  const r = row({ stage: 2, llm_fields: JSON.stringify({ amount: 5, status: 'paid' }) });
-  const revision = computeView(cust, [r], NOW).payload.source_revision;
-  const fresh = computeView({ ...cust, narrative: 'All paid.', narrative_revision: revision, narrative_at: '2026-10-09T09:30:00Z' }, [r], NOW).payload;
-  assert.equal(fresh.summary_stage, 3); assert.equal(fresh.summary_text, 'All paid.');
-  const stale = computeView({ ...cust, narrative: 'Old.', narrative_at: '2026-10-01T00:00:00Z' }, [r], NOW).payload;
-  assert.equal(stale.summary_stage, 1);
-  const late = { ...cust, narrative: 'All paid.', narrative_revision: revision, narrative_at: '2026-10-10T12:00:00Z' };
-  assert.equal(computeView(late, [r, row({invoice_id:'new',stage:0})], NOW).payload.summary_stage, 1);
-  assert.equal(computeView(late, [{...r,llm_fields:JSON.stringify({amount:7,status:'open'})}], NOW).payload.summary_stage, 1);
-});
-test('deleted_at is carried through', () => {
-  assert.equal(computeView({ ...cust, deleted_at: '2026-10-05T00:00:00Z' }, [row({})], NOW).payload.deleted_at, '2026-10-05T00:00:00Z');
-});
-```
-
-```js
-// workflows/code/cards.test.js
-const test = require('node:test'); const assert = require('node:assert');
-const { shapeCards, splitRemoved } = require('./cards');
-const W = { w_tom: { manager_id: 'm_anna', name: 'Tom' } };
-const pt = (o) => ({ payload: { customer_id: 'acme', name: 'Acme', worker_id: 'w_tom', stage: 2, summary_stage: 3, summary_text: 'narr', pending_count: 0, invoice_count: 3, open_amount: 1, overdue_count: 0, overdue_amount: 0, latest: { invoice_no: 'I', amount: 1, stage: 2 }, updated_at: 'u', ...o } });
-test('rung 3 when narrative fresh', () => { const c = shapeCards([pt({})], W)[0]; assert.equal(c.rung, 3); assert.equal(c.narrative, 'narr'); assert.equal(c.worker, 'Tom'); });
-test('rung follows stage without narrative', () => { const c = shapeCards([pt({ stage: 0, summary_stage: 1 })], W)[0]; assert.equal(c.rung, 0); assert.equal(c.narrative, ''); });
-test('splitRemoved computes purge_at', () => {
-  const { cards, removed } = splitRemoved(shapeCards([pt({}), pt({ customer_id: 'beta', deleted_at: '2026-10-01T00:00:00Z' })], W));
-  assert.equal(cards.length, 1); assert.equal(removed[0].purge_at, '2026-10-31T00:00:00Z');
-});
-```
-
-```js
-// workflows/code/match.test.js
-const test = require('node:test'); const assert = require('node:assert');
-const { pickMatchedLine } = require('./match');
-const inv = [{ invoice_no: 'INV-1', vendor: 'Hetzner', items: 'Hetzner servers', status: 'open' }, { invoice_no: 'INV-2', vendor: 'Deloitte', items: 'consulting', status: 'paid' }];
-test('picks the best overlapping line', () => assert.equal(pickMatchedLine('servers', inv), 'INV-1 · Hetzner servers'));
-test('no overlap returns null', () => assert.equal(pickMatchedLine('zebra', inv), null));
-```
-
-- [ ] **Step 2: Run tests, verify they fail**
+- [x] **Step 2: Run the tests, verify they fail**
 
 Run: `node --test workflows/code/*.test.js`
-Expected: every file fails with `Cannot find module './ids'` (and so on).
+Expected: every file fails with `Cannot find module`.
 
-- [ ] **Step 3: Write the implementations**
+- [x] **Step 3: Write the implementations**
 
-```js
-// workflows/code/ids.js
-function uuidFromHex(hex) {
-  const h = hex.toLowerCase();
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
-}
-function resolveUpload(sampleFile, workerId, workers) {
-  const slug = sampleFile.replace(/\.pdf$/i, '').split('-')[0].toLowerCase();
-  const w = workers[workerId];
-  if (!w) throw new Error(`unknown worker ${workerId}`);
-  return { customer_id: slug, worker_id: workerId, manager_id: w.manager_id };
-}
-module.exports = { uuidFromHex, resolveUpload };
-```
-
-```js
-// workflows/code/coarse.js
-// ponytail: deliberately naive. "4,250.00" parses right, "12.300,00" parses as 12.3. The vision stage fixes it on stage.
-function coarseRead(text) {
-  const t = text || '';
-  const g = (re) => { const m = t.match(re); return m ? m[1].trim() : null; };
-  const raw = g(/total[^0-9]*([0-9][0-9.,]*)/i);
-  return {
-    invoice_no: g(/invoice\s*(?:no\.?|number|#)\s*[:#]?\s*([A-Z0-9-]+)/i),
-    date: g(/(?<!due\s)date\s*:?\s*(\d{4}-\d{2}-\d{2})/i),
-    due_date: g(/due\s*(?:date)?\s*:?\s*(\d{4}-\d{2}-\d{2})/i),
-    amount: raw === null ? null : parseFloat(raw.replace(/,/g, '')),
-    vendor: g(/from\s*:?\s*([^\n]+)/i),
-  };
-}
-module.exports = { coarseRead };
-```
-
-```js
-// workflows/code/validate.js
-function toNumber(v) {
-  if (typeof v === 'number') return v;
-  let s = String(v).replace(/[^\d.,-]/g, '');
-  if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
-  else s = s.replace(/,/g, '');
-  if (!s) return NaN;
-  return Number(s);
-}
-function validateFields(obj) {
-  for (const k of ['invoice_no', 'date', 'due_date', 'amount', 'vendor', 'customer_name', 'status']) {
-    if (obj[k] === undefined || obj[k] === null || obj[k] === '') throw new Error(`missing ${k}`);
-  }
-  const amount = toNumber(obj.amount);
-  if (!Number.isFinite(amount)) throw new Error('amount not numeric');
-  if (!['open', 'paid', 'overdue'].includes(obj.status)) throw new Error(`bad status ${obj.status}`);
-  for (const k of ['date', 'due_date']) if (!/^\d{4}-\d{2}-\d{2}$/.test(obj[k])) throw new Error(`bad ${k}`);
-  return { ...obj, amount, line_items_summary: String(obj.line_items_summary || '').slice(0, 120) };
-}
-module.exports = { toNumber, validateFields };
-```
-
-```js
-// workflows/code/view.js
-function computeView(customer, invoices, nowIso) {
-  const parse = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
-  const inv = invoices.map((r) => {
-    const f = r.stage >= 2 ? parse(r.llm_fields) : parse(r.regex_fields);
-    return {
-      id: r.invoice_id, invoice_no: f.invoice_no || null, date: f.date || null, due_date: f.due_date || null,
-      amount: Number.isFinite(f.amount) ? f.amount : null, vendor: f.vendor || null,
-      status: f.status || 'open', stage: r.stage, error: r.error || '', items: f.line_items_summary || '',
-      received_at: r.received_at || '',
-    };
-  }).sort((a, b) => a.received_at.localeCompare(b.received_at));
-  const sum = (xs) => +xs.reduce((a, b) => a + b, 0).toFixed(2);
-  const priced = inv.filter((i) => i.amount !== null);
-  const open = priced.filter((i) => i.status !== 'paid');
-  const overdue = priced.filter((i) => i.status === 'overdue');
-  const stage = inv.length ? Math.min(...inv.map((i) => (i.stage < 0 ? 1 : i.stage))) : 0;
-  const pending = inv.filter((i) => i.stage === 0 || i.stage === 1).length;
-  const last = inv[inv.length - 1] || null;
-  const mechanical = `${inv.length} invoices, ${sum(open.map((i) => i.amount)).toFixed(2)} EUR open, ${overdue.length} overdue, last ${last ? last.received_at.slice(0, 10) : 'never'}`;
-  const revision = JSON.stringify(invoices.map(r => [r.invoice_id, r.stage, r.regex_fields || '{}', r.llm_fields || '{}', r.error || '', r.received_at || '']).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
-  const fresh = stage === 2 && pending === 0 && !!customer.narrative && customer.narrative_revision === revision;
-  const digest = inv.map((i) => `${i.invoice_no || '?'} | ${i.date || '?'} | ${i.amount === null ? '?' : i.amount.toFixed(2)} EUR | due ${i.due_date || '?'} | ${i.status} | ${i.items}`).join('\n');
-  const payload = {
-    manager_id: customer.manager_id, worker_id: customer.worker_id, customer_id: customer.customer_id,
-    name: customer.name || customer.customer_id,
-    stage, pending_count: pending, invoice_count: inv.length,
-    total_amount: sum(priced.map((i) => i.amount)), open_amount: sum(open.map((i) => i.amount)),
-    overdue_count: overdue.length, overdue_amount: sum(overdue.map((i) => i.amount)),
-    last_invoice_at: last ? last.received_at : null,
-    latest: last ? { id: last.id, invoice_no: last.invoice_no, amount: last.amount, stage: last.stage } : null,
-    source_revision: revision,
-    summary_stage: fresh ? 3 : 1, summary_text: fresh ? customer.narrative : mechanical,
-    summary_generated_at: fresh ? customer.narrative_at : nowIso,
-    updated_at: nowIso,
-    invoices: inv.map(({ received_at, ...rest }) => rest),
-  };
-  if (customer.deleted_at) payload.deleted_at = customer.deleted_at;
-  return {
-    payload,
-    texts: {
-      summary: payload.summary_text,
-      digest: digest || 'no invoices',
-      bm25: invoices.map((r) => r.text || '').join('\n').trim() || 'no text',
-    },
-  };
-}
-module.exports = { computeView };
-```
-
-```js
-// workflows/code/cards.js
-function shapeCards(points, workers) {
-  return points.map(({ payload: q }) => ({
-    customer_id: q.customer_id, name: q.name, worker: (workers[q.worker_id] || {}).name || q.worker_id,
-    stage: q.stage, rung: q.summary_stage === 3 ? 3 : q.stage,
-    pending_count: q.pending_count, invoice_count: q.invoice_count,
-    open_amount: q.open_amount, overdue_count: q.overdue_count, overdue_amount: q.overdue_amount,
-    latest: q.latest, narrative: q.summary_stage === 3 ? q.summary_text : '',
-    updated_at: q.updated_at, deleted_at: q.deleted_at || null,
-  }));
-}
-function splitRemoved(cards) {
-  const plus30 = (iso) => new Date(new Date(iso).getTime() + 30 * 864e5).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  return {
-    cards: cards.filter((c) => !c.deleted_at),
-    removed: cards.filter((c) => c.deleted_at).map((c) => ({ customer_id: c.customer_id, name: c.name, deleted_at: c.deleted_at, purge_at: plus30(c.deleted_at) })),
-  };
-}
-module.exports = { shapeCards, splitRemoved };
-```
-
-```js
-// workflows/code/match.js
-// ponytail: MaxSim does not report which digest line won; token overlap is the cheap stand-in.
-function pickMatchedLine(q, invoices) {
-  const toks = String(q).toLowerCase().split(/\W+/).filter((t) => t.length > 2);
-  let best = null, bestScore = 0;
-  for (const i of invoices || []) {
-    const line = `${i.invoice_no || ''} ${i.vendor || ''} ${i.items || ''} ${i.status || ''}`.toLowerCase();
-    const score = toks.filter((t) => line.includes(t)).length;
-    if (score > bestScore) { bestScore = score; best = i; }
-  }
-  return best ? `${best.invoice_no} · ${best.items || best.vendor}` : null;
-}
-module.exports = { pickMatchedLine };
-```
-
-- [ ] **Step 4: Run tests, verify they pass**
+- [x] **Step 4: Run the tests, verify they pass**
 
 Run: `node --test workflows/code/*.test.js`
-Expected: all tests pass, `# fail 0`.
+Expected: `pass 40`, `fail 0`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add workflows/code
@@ -736,7 +483,7 @@ Expected: `OK`, then `no point for m_anna/acme` with exit 2 (the workflow doesn'
 | 6 | Compute the view | Code, Run once for all items. Body below |
 | 7 | Upsert the point with inference | HTTP Request. PUT `={{ $('Config').item.json.QDRANT_URL }}/collections/{{ $('Config').item.json.COLLECTION }}/points?wait=true`. Auth: Header Auth, `Qdrant api-key`. Body: JSON, Using fields below: `={{ $json.body }}` as raw JSON (Specify Body: Using JSON, JSON: `={{ JSON.stringify($json.body) }}`) |
 
-Code node 6 builds the same JSON as `bodies.upsert` (compare with `python3 scripts/bodies.py`). Paste the `uuidFromHex` and `computeView` function bodies from `workflows/code/ids.js` and `view.js` verbatim (without the `module.exports` lines), then:
+Code node 6 builds the same JSON as `bodies.upsert` (compare with `python3 scripts/bodies.py`). Paste `workflows/code/ids.js` and `view.js` whole, each without its `module.exports` line (the helpers inside them are needed), then:
 
 ```js
 const cfg = $('Config').first().json;
@@ -800,7 +547,7 @@ git commit -m "feat(n8n): 03 Rebuild point sub-workflow; point check script"
 | 1 | When Executed by Another Workflow | Fields: `customer_id`, `manager_id` |
 | 2 | Config | `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`. Include other input fields: on |
 | 3 | Hash the point id | Crypto SHA256 of `={{ $json.manager_id }}/{{ $json.customer_id }}` → `idhash` |
-| 4 | Format the point id | Code: paste `uuidFromHex`; `return [{json:{id:uuidFromHex($json.idhash), ...$('Config').first().json}}];` |
+| 4 | Format the point id | Code: paste `ids.js` (without `module.exports`); `return [{json:{id:uuidFromHex($json.idhash), ...$('Config').first().json}}];` |
 | 5 | Read the point | HTTP POST to Config Qdrant collection `/points`, body `={{ JSON.stringify({shard_key:$json.manager_id, ids:[$json.id], with_payload:true}) }}`, Header Auth Qdrant |
 | 6 | Prepare the narrative snapshot | Code: `const cfg = $('Config').first().json; const p = $json.result?.[0]?.payload; if (!p || p.manager_id !== cfg.manager_id || p.customer_id !== cfg.customer_id) throw new Error('missing tenant point'); if (p.stage !== 2 || p.pending_count !== 0) return []; return [{json:{payload:p}}];` |
 | 7 | Ask for three sentences | HTTP Request POST `https://openrouter.ai/api/v1/chat/completions`, Header Auth `OpenRouter bearer`, body: see below |
@@ -834,11 +581,11 @@ The snapshot revision is captured before the model call and stored with its narr
 | 4 | Download the PDF for processing | HTTP Request GET `={{ $('Config').first().json.sample_url }}`, response File, binary `data`; validate URL against Config's sample base and allowlist before requesting |
 | 5 | Read the PDF as base64 | Code: `const item = $input.first(); const buffer = await this.helpers.getBinaryDataBuffer(0, 'data'); return [{json:{b64: buffer.toString('base64')}, binary: item.binary}];` |
 | 6 | Pull the text out of the PDF | Extract from File, operation PDF, binary `data`; empty text is valid |
-| 7 | Coarse read with regex | Code: paste `coarseRead`; `const text = $json.text || ''; return [{json:{regex_fields: JSON.stringify(coarseRead(text)), text}}];` |
+| 7 | Coarse read with regex | Code: paste `coarse.js` (without `module.exports`); `const text = $json.text || ''; return [{json:{regex_fields: JSON.stringify(coarseRead(text)), text}}];` |
 | 8 | Update the row: stage 1 | Data Table `invoices`, Update where `invoice_id` equals `={{ $('Config').first().json.invoice_id }}`: `stage` = 1, `regex_fields`, `text` |
 | 9 | Show the coarse view | Execute Sub-workflow `03 Rebuild point` |
 | 10 | Ask the vision model to read the PDF | HTTP Request POST OpenRouter, Header Auth `OpenRouter bearer`, Timeout 30000, Retry 1, On Error: Continue (using error output). Body below |
-| 11 | Validate the fields | Code: paste `toNumber` and `validateFields`; `const c = JSON.parse($json.choices[0].message.content); return [{json:{llm_fields: JSON.stringify(validateFields(c))}}];` On Error: Continue (using error output) |
+| 11 | Validate the fields | Code: paste `validate.js` (without `module.exports`); `const c = JSON.parse($json.choices[0].message.content); return [{json:{llm_fields: JSON.stringify(validateFields(c))}}];` On Error: Continue (using error output) |
 | 12 | Update the row: stage 2 | Data Table `invoices` Update where `invoice_id` equals: `stage` = 2, `llm_fields` |
 | 13 | Update the row: stage -1 | Data Table `invoices` Update where `invoice_id` equals: `stage` = -1, `error` = `={{ $json.error ? ($json.error.message || JSON.stringify($json.error)) : 'vision failed' }}`. Connected from the error outputs of 10 and 11 |
 | 14 | Show the sharp view | Execute Sub-workflow `03 Rebuild point`. Connected from 12 and from 13 |
@@ -875,7 +622,7 @@ Renumber the original rows 7 through 13 as 8 through 14 after inserting the down
 | 5 | Seen this hash before? | Data Table `invoices` Get where `pdf_hash` equals `={{ $json.pdf_hash }}`. Always output data: on |
 | 6 | Is it a duplicate? | If: `={{ !!$json.invoice_id }}` |
 | 7 | Say it is a duplicate | Form (Form Ending). Completion title "Duplicate", message `=That's {{ $('Seen this hash before?').first().json.filename }} again (hash match). Nothing ingested.` |
-| 8 | Resolve the customer and manager | Code: paste `resolveUpload`; `const cfg = $('Config').first().json; const r = resolveUpload(cfg.sample, cfg.worker, JSON.parse(cfg.WORKERS)); const id = 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); return [{json:{...r, invoice_id: id, sample_url: cfg.SAMPLES_BASE_URL + '/' + cfg.sample, filename: cfg.sample, pdf_hash: $('Hash the PDF').first().json.pdf_hash, received_at: new Date().toISOString().replace(/\.\d{3}Z$/,'Z')}}];` |
+| 8 | Resolve the customer and manager | Code: paste `ids.js` (without `module.exports`); `const cfg = $('Config').first().json; const r = resolveUpload(cfg.sample, cfg.worker, JSON.parse(cfg.WORKERS)); const id = 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); return [{json:{...r, invoice_id: id, sample_url: cfg.SAMPLES_BASE_URL + '/' + cfg.sample, filename: cfg.sample, pdf_hash: $('Hash the PDF').first().json.pdf_hash, received_at: new Date().toISOString().replace(/\.\d{3}Z$/,'Z')}}];` |
 | 9 | Upsert the customer row | Data Table `customers`, Insert or Update (match on `customer_id` and `manager_id`): `worker_id`, `name` = `={{ $json.customer_id.charAt(0).toUpperCase() + $json.customer_id.slice(1) }}` only on insert if the node supports it, otherwise set it every time |
 | 10 | Append the invoice row | Data Table `invoices`, Insert: `invoice_id` = invoice_id, `customer_id`, `worker_id`, `manager_id`, `pdf_hash`, `filename`, `stage` = 0, `text` = '', `regex_fields` = '{}', `llm_fields` = '{}', `error` = '', `received_at` |
 | 11 | Process in the background | Execute Sub-workflow `02 Process`, **Wait for Sub-Workflow Completion: off**, inputs `invoice_id`, `customer_id`, `manager_id`, `sample_url` from `Resolve the customer and manager`; no binary input |
@@ -934,7 +681,7 @@ git commit -m "feat(n8n): ingest, staged processing, and narrative workflows"
 | 2 | Config | `QDRANT_URL`, `COLLECTION`, `WORKERS`, `MANAGERS`, `qdrant_started_at` = `={{ Date.now() }}`. Include other input fields: on |
 | 3 | Scroll live customers | HTTP Request POST `.../points/scroll`, Header Auth `Qdrant api-key`. Body below. Settings: Include response headers and status: off |
 | 4 | Scroll removed customers | same, body differs by one condition (below) |
-| 5 | Shape the cards | Code, paste `shapeCards` and `splitRemoved`; body below |
+| 5 | Shape the cards | Code, paste `cards.js` (without `module.exports`); body below |
 | 6 | Respond with cards | Respond to Webhook, JSON, `={{ $json }}`, header `Access-Control-Allow-Origin: *` |
 
 Node 3 body:
@@ -969,7 +716,7 @@ return [{ json: { cards, removed, latency_ms: Date.now() - $('Config').first().j
 | 7 | Search three vectors in one request | Webhook GET, path `search`, Respond: Using Respond to Webhook node |
 | 8 | Config (search) | Edit Fields, same values as node 2 |
 | 9 | Run the hybrid query | HTTP Request POST `.../points/query`, Header Auth. Body: `bodies.hybrid_query` rebuilt as an IIFE like node 3, with `qs.manager`, `qs.q`, and `new Date().toISOString()` as its arguments |
-| 10 | Pick the matched line | Code, paste `pickMatchedLine`; `const r = $json.result.points; const q = $('Search three vectors in one request').first().json.query.q; return [{json:{results: r.map(p => ({customer_id: p.payload.customer_id, score: +p.score.toFixed(4), matched_line: pickMatchedLine(q, p.payload.invoices)})).filter(p => p.matched_line !== null), latency_ms: Date.now() - $('Config (search)').first().json.qdrant_started_at}}];` |
+| 10 | Pick the matched line | Code, paste `match.js` (without `module.exports`); `const r = $json.result.points; const q = $('Search three vectors in one request').first().json.query.q; return [{json:{results: r.map(p => ({customer_id: p.payload.customer_id, score: +p.score.toFixed(4), matched_line: pickMatchedLine(q, p.payload.invoices)})).filter(p => p.matched_line !== null), latency_ms: Date.now() - $('Config (search)').first().json.qdrant_started_at}}];` |
 | 11 | Respond with matches | Respond to Webhook, JSON, CORS header as node 6 |
 
 Sticky (one, over node 9): "Eight primitives, one request. Tenant filter, is_empty, bm25, ColBERT multivector, dense, inference ×3, RRF, decay formula."
