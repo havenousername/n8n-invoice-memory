@@ -128,6 +128,8 @@ Ceiling: `digest` truncates past ~512 ColBERT tokens, roughly 30 invoices. Fine 
 
 Field values come from `llm_fields` when stage ≥ 2, else `regex_fields`. That is what makes the amount visibly correct itself.
 
+Badge rung, used in chat messages and the blur ladder: rung 1 = `stage` 1 (coarse), rung 2 = `stage` 2 (sharp), rung 3 = `summary_stage` 3 (narrative). `stage` 0 shows as "received", blur 14px. The badge reads `stage <rung>/3 · <pending_count> of <invoice_count> processing`.
+
 ## 5. Workflows
 
 Every workflow starts with an Edit Fields node named `Config`: `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`, and `DEPARTMENT` where relevant. Credentials: Qdrant as Header Auth (`api-key`), OpenRouter. No Variables, no community nodes, no Code node npm imports, no filesystem, no hardcoded IDs.
