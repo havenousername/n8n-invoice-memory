@@ -39,7 +39,7 @@ Numbering note: the spec's "04 Dashboard API" is split here into `04 Dashboard r
 ### Task 1: Repo Scaffold and Qdrant Setup Script
 
 **Files:**
-- Create: `.gitignore`, `.env.example`, `qdrant/lib.sh`, `qdrant/setup.sh`
+- Create: `.gitignore`, `.env.example`, `LICENSE` (Apache-2.0, same as Clelia's `AstraBert/n8n-discord-bot` so the two booth repos match), `qdrant/lib.sh`, `qdrant/setup.sh`
 - Test: manual run against the cluster, twice
 
 **Interfaces:**
@@ -127,7 +127,8 @@ Expected: first run prints `indexes: [...9 names...]` and `sharding: custom`; se
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .gitignore .env.example qdrant/lib.sh qdrant/setup.sh
+curl -sSL https://www.apache.org/licenses/LICENSE-2.0.txt -o LICENSE
+git add .gitignore .env.example LICENSE qdrant/lib.sh qdrant/setup.sh
 git commit -m "feat(qdrant): collection setup script with shard keys and indexes
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -1396,15 +1397,21 @@ Pick an invoice PDF. Two seconds later the manager's dashboard has an answer. A 
 
 One Qdrant point per customer, rebuilt in stages from an append-only log in n8n Data Tables. Three vectors on the point, embedded inside Qdrant Cloud Inference. A static dashboard that polls n8n webhooks. Built for the Qdrant booth at n8n In The Loop 2026, Berlin.
 
+## How It Works
+<five sentences: Form → log → staged rebuild → one point → dashboard; same section order as Clelia's repo so the two read as a pair>
+
 ## Eight Primitives, One Request
 
 <the exact JSON from spec section 11 and the eight-row table under it>
+
+## Requirements
+Qdrant Cloud cluster with Inference enabled, n8n Cloud (1.105 or later, Data Tables), an OpenRouter key, Chrome for printing samples, Node 18 or later to run the tests.
 
 ## Setup in Three Steps
 
 1. Create a free Qdrant Cloud cluster with Inference enabled. Copy `.env.example` to `.env`, fill it in, run `qdrant/setup.sh`, then `qdrant/smoke.sh`.
 2. In n8n Cloud create two credentials: `Qdrant api-key` (Header Auth, header `api-key`) and `OpenRouter bearer` (Header Auth, header `Authorization`, value `Bearer <key>`). Create the two Data Tables as listed in `docs/superpowers/specs/2026-10-09-invoice-memory-design.md`, section 4.
-3. Import the six JSON files from `workflows/`, open the `Start here` sticky in `01 Ingest`, set the `Config` values, activate all six. Open `dashboard/index.html` from any static server and enter your n8n base URL.
+3. Import the six JSON files from `workflows/` (Workflows → Import from File), reassign the two credentials on each HTTP Request node, open the `Start here` sticky in `01 Ingest`, set the `Config` values, activate all six. Open `dashboard/index.html` from any static server and enter your n8n base URL.
 
 ## What Each Workflow Does
 <one line each for 01, 02, 02b, 03, 04, 05, 06>
