@@ -1,0 +1,263 @@
+{
+  "name": "05 Dashboard writes",
+  "nodes": [
+    {
+      "id": "11b29445-f0b6-5b94-9e45-1de6e5cb4ed1",
+      "name": "Send a document",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Dashboard secret"
+        }
+      },
+      "webhookId": "a92215dd-42ce-5253-bb35-40b9248d2203"
+    },
+    {
+      "id": "4483b164-7570-583d-b873-a861ea8fb772",
+      "name": "Name the file",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "743dd1f8-92db-5442-b289-e1b0f669ada8",
+              "name": "file",
+              "value": "={{ $json.body.file }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "301fe507-59f9-5f61-8e15-bc6f0d51c626",
+      "name": "Record the document",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "01b Record a document"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "340f934e-8743-59c3-8b48-ad75e143af42",
+      "name": "Answer with the result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      }
+    },
+    {
+      "id": "c2f33fcb-7df4-597d-9f6a-4623d8e6dddc",
+      "name": "Stop the day",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "day/stop",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Dashboard secret"
+        }
+      },
+      "webhookId": "747a0909-3d52-5847-b5fe-8bd8c9e0c260"
+    },
+    {
+      "id": "f61604e1-0980-5473-bc84-991afb72bca0",
+      "name": "Set running to false",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        400
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "simulation"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "name",
+              "condition": "eq",
+              "keyValue": "day"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "day",
+            "running": "={{ false }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "running",
+              "displayName": "running",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "25d97215-58d3-55c4-b230-20aab27cac5a",
+      "name": "Answer stopped",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        440,
+        400
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { running: false } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "0a42b5ed-f5fe-553a-a8f4-31125c452cd9",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -240
+      ],
+      "parameters": {
+        "content": "The dashboard never polls n8n: it reads Qdrant directly. These two webhooks are its only writes; POST /day/start belongs to 00 Working day.",
+        "width": 440,
+        "height": 140
+      }
+    }
+  ],
+  "connections": {
+    "Send a document": {
+      "main": [
+        [
+          {
+            "node": "Name the file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Name the file": {
+      "main": [
+        [
+          {
+            "node": "Record the document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record the document": {
+      "main": [
+        [
+          {
+            "node": "Answer with the result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stop the day": {
+      "main": [
+        [
+          {
+            "node": "Set running to false",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set running to false": {
+      "main": [
+        [
+          {
+            "node": "Answer stopped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

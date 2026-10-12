@@ -1,4 +1,4 @@
-// Glue for "Keep only the narrative" in 02b Write the narrative. A bad reply stops the run: the point stays at rung 2.
+// Glue for "Keep only the narrative" in 02b Write the summary. A bad reply stops the run: the office keeps its mechanical summary.
 let reply;
 try {
   reply = JSON.parse($json.choices[0].message.content);

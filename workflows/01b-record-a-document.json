@@ -1,0 +1,921 @@
+{
+  "name": "01b Record a document",
+  "nodes": [
+    {
+      "id": "3345afc1-bf4d-5cdf-b2fa-42ceac9836e1",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "notes": "Expects either a static `file` from the booth pool, or a generated `filename`, `pdf_base64`, `office_id`, and `worker_id`. Answers status, document_id, duplicate_of, filename, office_id, manager_id.",
+      "notesInFlow": true
+    },
+    {
+      "id": "c914c89c-d25b-5e41-9309-8369719c509f",
+      "name": "Validate the submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const OFFICES = [{\"office_id\": \"berlin\", \"code\": \"ber\", \"name\": \"Berlin\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_tom\", \"worker_name\": \"Tom\", \"cost_center\": \"CC-BER-01\", \"budgets\": {\"people\": 820000, \"cloud\": 180000, \"gpu\": 120000, \"office\": 95000, \"travel\": 60000}}, {\"office_id\": \"munich\", \"code\": \"muc\", \"name\": \"Munich\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_tom\", \"worker_name\": \"Tom\", \"cost_center\": \"CC-MUC-01\", \"budgets\": {\"people\": 760000, \"cloud\": 140000, \"gpu\": 210000, \"office\": 90000, \"travel\": 50000}}, {\"office_id\": \"vienna\", \"code\": \"vie\", \"name\": \"Vienna\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_lena\", \"worker_name\": \"Lena\", \"cost_center\": \"CC-VIE-01\", \"budgets\": {\"people\": 540000, \"cloud\": 90000, \"gpu\": 60000, \"office\": 70000, \"travel\": 40000}}, {\"office_id\": \"amsterdam\", \"code\": \"ams\", \"name\": \"Amsterdam\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_jules\", \"worker_name\": \"Jules\", \"cost_center\": \"CC-AMS-01\", \"budgets\": {\"people\": 610000, \"cloud\": 150000, \"gpu\": 90000, \"office\": 80000, \"travel\": 55000}}, {\"office_id\": \"paris\", \"code\": \"par\", \"name\": \"Paris\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_jules\", \"worker_name\": \"Jules\", \"cost_center\": \"CC-PAR-01\", \"budgets\": {\"people\": 700000, \"cloud\": 120000, \"gpu\": 140000, \"office\": 110000, \"travel\": 70000}}, {\"office_id\": \"london\", \"code\": \"lon\", \"name\": \"London\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_mia\", \"worker_name\": \"Mia\", \"cost_center\": \"CC-LON-01\", \"budgets\": {\"people\": 880000, \"cloud\": 200000, \"gpu\": 160000, \"office\": 130000, \"travel\": 90000}}];\nconst STATIC_DOCUMENTS = {\"ber-po-1042-v1.pdf\": {\"office_id\": \"berlin\", \"manager_id\": \"m_anna\", \"worker_id\": \"w_tom\", \"duplicate_of\": null, \"pdf_base64\": \"JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgL0YyIDYgMCBSID4+ID4+ID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggODE4ID4+CnN0cmVhbQpCVCAvRjIgMTMgVGYgNTYgNzkwIFRkIChROG50ZW4gR21iSCkgVGogRVQKQlQgL0YyIDIyIFRmIDU2IDc1MCBUZCAoQkVTVEVMTFVORykgVGogRVQKMC44NSAwLjE0IDAuMzAgUkcgMS41IHcgNTYgNzM1IG0gNTM5IDczNSBsIFMKQlQgL0YxIDExIFRmIDU2IDcwMCBUZCAoQmVsZWdudW1tZXI6IFBPLTEwNDIpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2ODEgVGQgKFZlcnNpb246IDEpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2NjIgVGQgKERhdHVtOiAwNi4xMC4yMDI2KSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNjQzIFRkIChLb3N0ZW5zdGVsbGU6IENDLUJFUi0wMSkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDYyNCBUZCAoU3RhbmRvcnQ6IEJlcmxpbikgVGogRVQKQlQgL0YxIDExIFRmIDU2IDYwNSBUZCAoTGllZmVyYW50OiBSZWNoZW53ZXJrIFN5c3RlbXMgR21iSCkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDU4NiBUZCAoS2F0ZWdvcmllOiBHUFUtUmVjaGVubGVpc3R1bmcpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA1NjcgVGQgKEJlc2NocmVpYnVuZzogR1BVLVNlcnZlciBcKDR4XCkgZlwzNzRyIGRlbiBJbmZlcmVuei1MYXVuY2gsIEFuemFobHVuZykgVGogRVQKQlQgL0YyIDE0IFRmIDU2IDUzOCBUZCAoQmV0cmFnOiA0OC4wMDAsMDAgXDIwMCkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDUxMiBUZCAoRWluZ2VyZWljaHQgdm9uOiBUb20pIFRqIEVUCkJUIC9GMSA4IFRmIDU2IDYwIFRkIChTeW50aGV0aXNjaGVyIEJlbGVnIGZcMzc0ciBlaW5lIERlbW8uIEtlaW5lIGVjaHRlIEZpcm1hLCBrZWluZSBlY2h0ZSBGb3JkZXJ1bmcuKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iago2IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYS1Cb2xkIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNTEgMDAwMDAgbiAKMDAwMDAwMTEyMCAwMDAwMCBuIAowMDAwMDAxMjE3IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNyAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMTMxOQolJUVPRgo=\"}, \"ber-po-1042-v2.pdf\": {\"office_id\": \"berlin\", \"manager_id\": \"m_anna\", \"worker_id\": \"w_tom\", \"duplicate_of\": null, \"pdf_base64\": \"JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgL0YyIDYgMCBSID4+ID4+ID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggODUwID4+CnN0cmVhbQpCVCAvRjIgMTMgVGYgNTYgNzkwIFRkIChROG50ZW4gR21iSCkgVGogRVQKQlQgL0YyIDIyIFRmIDU2IDc1MCBUZCAoQkVTVEVMTFVORykgVGogRVQKMC44NSAwLjE0IDAuMzAgUkcgMS41IHcgNTYgNzM1IG0gNTM5IDczNSBsIFMKQlQgL0YxIDExIFRmIDU2IDcwMCBUZCAoQmVsZWdudW1tZXI6IFBPLTEwNDIpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2ODEgVGQgKFZlcnNpb246IDIgXChlcnNldHp0IFZlcnNpb24gMVwpKSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNjYyIFRkIChEYXR1bTogMTMuMTAuMjAyNikgVGogRVQKQlQgL0YxIDExIFRmIDU2IDY0MyBUZCAoS29zdGVuc3RlbGxlOiBDQy1CRVItMDEpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2MjQgVGQgKFN0YW5kb3J0OiBCZXJsaW4pIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2MDUgVGQgKExpZWZlcmFudDogUmVjaGVud2VyayBTeXN0ZW1zIEdtYkgpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA1ODYgVGQgKEthdGVnb3JpZTogR1BVLVJlY2hlbmxlaXN0dW5nKSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNTY3IFRkIChCZXNjaHJlaWJ1bmc6IEdQVS1TZXJ2ZXIgXCgxMXhcKSBmXDM3NHIgZGVuIEluZmVyZW56LUxhdW5jaCwgQXVmdHJhZyBlcndlaXRlcnQpIFRqIEVUCkJUIC9GMiAxNCBUZiA1NiA1MzggVGQgKEJldHJhZzogMTMyLjAwMCwwMCBcMjAwKSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNTEyIFRkIChFaW5nZXJlaWNodCB2b246IFRvbSkgVGogRVQKQlQgL0YxIDggVGYgNTYgNjAgVGQgKFN5bnRoZXRpc2NoZXIgQmVsZWcgZlwzNzRyIGVpbmUgRGVtby4gS2VpbmUgZWNodGUgRmlybWEsIGtlaW5lIGVjaHRlIEZvcmRlcnVuZy4pIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgPj4KZW5kb2JqCjYgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgPj4KZW5kb2JqCnhyZWYKMCA3CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI1MSAwMDAwMCBuIAowMDAwMDAxMTUyIDAwMDAwIG4gCjAwMDAwMDEyNDkgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA3IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxMzUxCiUlRU9GCg==\"}, \"muc-po-2041-v1.pdf\": {\"office_id\": \"munich\", \"manager_id\": \"m_anna\", \"worker_id\": \"w_tom\", \"duplicate_of\": null, \"pdf_base64\": \"JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgL0YyIDYgMCBSID4+ID4+ID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggODE0ID4+CnN0cmVhbQpCVCAvRjIgMTMgVGYgNTYgNzkwIFRkIChROG50ZW4gR21iSCkgVGogRVQKQlQgL0YyIDIyIFRmIDU2IDc1MCBUZCAoQkVTVEVMTFVORykgVGogRVQKMC44NSAwLjE0IDAuMzAgUkcgMS41IHcgNTYgNzM1IG0gNTM5IDczNSBsIFMKQlQgL0YxIDExIFRmIDU2IDcwMCBUZCAoQmVsZWdudW1tZXI6IFBPLTIwNDEpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2ODEgVGQgKFZlcnNpb246IDEpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2NjIgVGQgKERhdHVtOiAwOC4xMC4yMDI2KSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNjQzIFRkIChLb3N0ZW5zdGVsbGU6IENDLU1VQy0wMSkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDYyNCBUZCAoU3RhbmRvcnQ6IE11bmljaCkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDYwNSBUZCAoTGllZmVyYW50OiBIZXR6bmVyIE9ubGluZSBHbWJIKSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNTg2IFRkIChLYXRlZ29yaWU6IENsb3VkLUluZnJhc3RydWt0dXIpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA1NjcgVGQgKEJlc2NocmVpYnVuZzogRGVkaXppZXJ0ZSBTZXJ2ZXIgZlwzNzRyIGRpZSBTdGFnaW5nLVVtZ2VidW5nLCBPa3RvYmVyKSBUaiBFVApCVCAvRjIgMTQgVGYgNTYgNTM4IFRkIChCZXRyYWc6IDEyLjMwMCwwMCBcMjAwKSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNTEyIFRkIChFaW5nZXJlaWNodCB2b246IFRvbSkgVGogRVQKQlQgL0YxIDggVGYgNTYgNjAgVGQgKFN5bnRoZXRpc2NoZXIgQmVsZWcgZlwzNzRyIGVpbmUgRGVtby4gS2VpbmUgZWNodGUgRmlybWEsIGtlaW5lIGVjaHRlIEZvcmRlcnVuZy4pIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgPj4KZW5kb2JqCjYgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgPj4KZW5kb2JqCnhyZWYKMCA3CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI1MSAwMDAwMCBuIAowMDAwMDAxMTE2IDAwMDAwIG4gCjAwMDAwMDEyMTMgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA3IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxMzE1CiUlRU9GCg==\"}, \"ber-po-1042-v1-copy.pdf\": {\"office_id\": \"berlin\", \"manager_id\": \"m_anna\", \"worker_id\": \"w_tom\", \"duplicate_of\": \"ber-po-1042-v1.pdf\", \"pdf_base64\": \"JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgL0YyIDYgMCBSID4+ID4+ID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggODE4ID4+CnN0cmVhbQpCVCAvRjIgMTMgVGYgNTYgNzkwIFRkIChROG50ZW4gR21iSCkgVGogRVQKQlQgL0YyIDIyIFRmIDU2IDc1MCBUZCAoQkVTVEVMTFVORykgVGogRVQKMC44NSAwLjE0IDAuMzAgUkcgMS41IHcgNTYgNzM1IG0gNTM5IDczNSBsIFMKQlQgL0YxIDExIFRmIDU2IDcwMCBUZCAoQmVsZWdudW1tZXI6IFBPLTEwNDIpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2ODEgVGQgKFZlcnNpb246IDEpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA2NjIgVGQgKERhdHVtOiAwNi4xMC4yMDI2KSBUaiBFVApCVCAvRjEgMTEgVGYgNTYgNjQzIFRkIChLb3N0ZW5zdGVsbGU6IENDLUJFUi0wMSkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDYyNCBUZCAoU3RhbmRvcnQ6IEJlcmxpbikgVGogRVQKQlQgL0YxIDExIFRmIDU2IDYwNSBUZCAoTGllZmVyYW50OiBSZWNoZW53ZXJrIFN5c3RlbXMgR21iSCkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDU4NiBUZCAoS2F0ZWdvcmllOiBHUFUtUmVjaGVubGVpc3R1bmcpIFRqIEVUCkJUIC9GMSAxMSBUZiA1NiA1NjcgVGQgKEJlc2NocmVpYnVuZzogR1BVLVNlcnZlciBcKDR4XCkgZlwzNzRyIGRlbiBJbmZlcmVuei1MYXVuY2gsIEFuemFobHVuZykgVGogRVQKQlQgL0YyIDE0IFRmIDU2IDUzOCBUZCAoQmV0cmFnOiA0OC4wMDAsMDAgXDIwMCkgVGogRVQKQlQgL0YxIDExIFRmIDU2IDUxMiBUZCAoRWluZ2VyZWljaHQgdm9uOiBUb20pIFRqIEVUCkJUIC9GMSA4IFRmIDU2IDYwIFRkIChTeW50aGV0aXNjaGVyIEJlbGVnIGZcMzc0ciBlaW5lIERlbW8uIEtlaW5lIGVjaHRlIEZpcm1hLCBrZWluZSBlY2h0ZSBGb3JkZXJ1bmcuKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iago2IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYS1Cb2xkIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNTEgMDAwMDAgbiAKMDAwMDAwMTEyMCAwMDAwMCBuIAowMDAwMDAxMjE3IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNyAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMTMxOQolJUVPRgo=\"}};\n// Point ids and static document identity. Pasted into n8n Code nodes without the module.exports line.\n\nfunction uuidFromHex(hex) {\n  if (typeof hex !== 'string' || !/^[0-9a-f]{32,}$/i.test(hex)) {\n    throw new Error(`expected a sha-256 hex digest, got ${hex}`);\n  }\n  const h = hex.toLowerCase();\n  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;\n}\n\n// A static file's tenancy comes from the committed manifest, never from the request.\nfunction resolveDocument(file, documents) {\n  if (typeof file !== 'string' || !Object.hasOwn(documents, file)) throw new Error(`unknown document ${file}`);\n  const d = documents[file];\n  return { office_id: d.office_id, manager_id: d.manager_id, worker_id: d.worker_id, duplicate_of: d.duplicate_of || null };\n}\n\n// Glue for \"Validate the submission\" in 01b Record a document. build_workflows.py pastes ids.js, OFFICES, and\n// STATIC_DOCUMENTS (the booth pool, each PDF inlined) above it. Two inputs: a static `file` from the Form or the\n// console, or a generated PDF from 00 Working day. Neither caller is trusted: a static file must be in the pool, and a\n// generated one must name a known office, that office's worker, a well-formed file name, and carry a PDF.\nconst input = $json;\nlet doc;\nif (input.file) {\n  const meta = resolveDocument(input.file, STATIC_DOCUMENTS);\n  doc = { ...meta, filename: input.file, pdf_base64: STATIC_DOCUMENTS[input.file].pdf_base64 };\n} else {\n  const office = OFFICES.find((o) => o.office_id === input.office_id);\n  if (!office) throw new Error(`unknown office ${input.office_id}`);\n  if (input.worker_id !== office.worker_id) throw new Error(`worker ${input.worker_id} does not file for ${office.office_id}`);\n  const name = /^[a-z]{3}-(po|deal|cn)-\\d+-v\\d+(-copy)?\\.pdf$/;\n  if (typeof input.filename !== 'string' || !name.test(input.filename) || !input.filename.startsWith(`${office.code}-`)) {\n    throw new Error(`bad filename ${input.filename}`);\n  }\n  if (typeof input.pdf_base64 !== 'string' || !input.pdf_base64.startsWith('JVBERi0')) throw new Error('not a PDF');\n  doc = { office_id: office.office_id, manager_id: office.manager_id, worker_id: office.worker_id,\n    filename: input.filename, pdf_base64: input.pdf_base64 };\n}\nconst office = OFFICES.find((o) => o.office_id === doc.office_id);\nreturn [{ json: {\n  document_id: `doc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,\n  office_id: doc.office_id,\n  manager_id: doc.manager_id,\n  worker_id: doc.worker_id,\n  office_name: office.name,\n  filename: doc.filename,\n  pdf_base64: doc.pdf_base64,\n  received_at: new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z'),\n} }];\n"
+      }
+    },
+    {
+      "id": "bb84d3f4-be9b-58e1-ab89-1f8a7e6ab9d1",
+      "name": "Hash the PDF",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "value": "={{ $json.pdf_base64 }}",
+        "dataPropertyName": "pdf_hash",
+        "encoding": "hex"
+      }
+    },
+    {
+      "id": "4c867266-edc0-5513-8bff-7a22b156cc28",
+      "name": "Seen this PDF before?",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "documents"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "pdf_hash",
+              "condition": "eq",
+              "keyValue": "={{ $('Hash the PDF').first().json.pdf_hash }}"
+            },
+            {
+              "keyName": "office_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Validate the submission').first().json.office_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Validate the submission').first().json.manager_id }}"
+            },
+            {
+              "keyName": "kind",
+              "condition": "eq",
+              "keyValue": "document"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "40d448f0-5a51-56bf-bccf-27878b1e29f3",
+      "name": "Build the rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Glue for \"Build the rows\" in 01b Record a document. Its input is the earlier document with the same PDF in this\n// office, or the empty item from Always Output Data. A duplicate is recorded and never processed; a new document\n// starts at stage 0 with its PDF in the row, so nothing downstream downloads it again.\nconst v = $('Validate the submission').first().json;\nconst original = $json.document_id ? $json : null;\nreturn [{ json: {\n  duplicate: !!original,\n  original_filename: original ? original.filename : '',\n  office: { office_id: v.office_id, manager_id: v.manager_id, name: v.office_name },\n  row: {\n    document_id: v.document_id,\n    kind: original ? 'duplicate' : 'document',\n    duplicate_of: original ? original.document_id : '',\n    office_id: v.office_id,\n    manager_id: v.manager_id,\n    worker_id: v.worker_id,\n    pdf_hash: $('Hash the PDF').first().json.pdf_hash,\n    filename: v.filename,\n    text: '',\n    stage: 0,\n    regex_fields: '{}',\n    llm_fields: '{}',\n    error: '',\n    received_at: v.received_at,\n    pdf_base64: v.pdf_base64,\n  },\n} }];\n"
+      }
+    },
+    {
+      "id": "e1d22dcc-5e95-5867-be8b-4bc2e934b02f",
+      "name": "Is it a duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3123e842-23a6-511b-81df-79587b6cb2bd",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b8d30f33-76f3-517c-bfca-aff8be3dcc87",
+      "name": "Append the duplicate row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        -200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "documents"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "document_id": "={{ $('Build the rows').first().json.row.document_id }}",
+            "kind": "={{ $('Build the rows').first().json.row.kind }}",
+            "duplicate_of": "={{ $('Build the rows').first().json.row.duplicate_of }}",
+            "office_id": "={{ $('Build the rows').first().json.row.office_id }}",
+            "manager_id": "={{ $('Build the rows').first().json.row.manager_id }}",
+            "worker_id": "={{ $('Build the rows').first().json.row.worker_id }}",
+            "pdf_hash": "={{ $('Build the rows').first().json.row.pdf_hash }}",
+            "filename": "={{ $('Build the rows').first().json.row.filename }}",
+            "text": "={{ $('Build the rows').first().json.row.text }}",
+            "stage": "={{ $('Build the rows').first().json.row.stage }}",
+            "regex_fields": "={{ $('Build the rows').first().json.row.regex_fields }}",
+            "llm_fields": "={{ $('Build the rows').first().json.row.llm_fields }}",
+            "error": "={{ $('Build the rows').first().json.row.error }}",
+            "received_at": "={{ $('Build the rows').first().json.row.received_at }}",
+            "pdf_base64": "={{ $('Build the rows').first().json.row.pdf_base64 }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "document_id",
+              "displayName": "document_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "kind",
+              "displayName": "kind",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "duplicate_of",
+              "displayName": "duplicate_of",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "office_id",
+              "displayName": "office_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "worker_id",
+              "displayName": "worker_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pdf_hash",
+              "displayName": "pdf_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "filename",
+              "displayName": "filename",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "stage",
+              "displayName": "stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "regex_fields",
+              "displayName": "regex_fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_fields",
+              "displayName": "llm_fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pdf_base64",
+              "displayName": "pdf_base64",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1405fc6-5213-5b3d-abf1-1accd88b6bf4",
+      "name": "Rebuild the office",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -200
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "03 Rebuild office point"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "d42ea1b8-0a66-59d2-a2a9-0f5180563469",
+      "name": "Answer: duplicate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1760,
+        -200
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c08ffcf-89de-5d7e-bd9c-1b326c9b974d",
+              "name": "status",
+              "value": "duplicate",
+              "type": "string"
+            },
+            {
+              "id": "0b70f342-e2c1-5675-a63b-811ab300eb17",
+              "name": "document_id",
+              "value": "={{ $('Build the rows').first().json.row.document_id }}",
+              "type": "string"
+            },
+            {
+              "id": "97fe123c-494c-5c78-958d-103ac7812cc5",
+              "name": "duplicate_of",
+              "value": "={{ $('Build the rows').first().json.row.duplicate_of }}",
+              "type": "string"
+            },
+            {
+              "id": "d75436e1-4968-544e-a0a5-f1bb05d2bacd",
+              "name": "filename",
+              "value": "={{ $('Build the rows').first().json.original_filename }}",
+              "type": "string"
+            },
+            {
+              "id": "675f479b-77b4-5b67-92a1-8b9d871a9500",
+              "name": "office_id",
+              "value": "={{ $('Build the rows').first().json.row.office_id }}",
+              "type": "string"
+            },
+            {
+              "id": "6c2b01bb-ca8b-5c8d-9d45-0068760a1aa1",
+              "name": "manager_id",
+              "value": "={{ $('Build the rows').first().json.row.manager_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "265207dd-092f-50bd-bd20-0d1551738111",
+      "name": "Upsert the office row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "offices"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "office_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Build the rows').first().json.row.office_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Build the rows').first().json.row.manager_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "office_id": "={{ $('Build the rows').first().json.row.office_id }}",
+            "manager_id": "={{ $('Build the rows').first().json.row.manager_id }}",
+            "name": "={{ $('Build the rows').first().json.office.name }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "office_id",
+              "displayName": "office_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "571798b7-0c85-5cff-9972-02ef920a2ba0",
+      "name": "Append the document row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "documents"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "document_id": "={{ $('Build the rows').first().json.row.document_id }}",
+            "kind": "={{ $('Build the rows').first().json.row.kind }}",
+            "duplicate_of": "={{ $('Build the rows').first().json.row.duplicate_of }}",
+            "office_id": "={{ $('Build the rows').first().json.row.office_id }}",
+            "manager_id": "={{ $('Build the rows').first().json.row.manager_id }}",
+            "worker_id": "={{ $('Build the rows').first().json.row.worker_id }}",
+            "pdf_hash": "={{ $('Build the rows').first().json.row.pdf_hash }}",
+            "filename": "={{ $('Build the rows').first().json.row.filename }}",
+            "text": "={{ $('Build the rows').first().json.row.text }}",
+            "stage": "={{ $('Build the rows').first().json.row.stage }}",
+            "regex_fields": "={{ $('Build the rows').first().json.row.regex_fields }}",
+            "llm_fields": "={{ $('Build the rows').first().json.row.llm_fields }}",
+            "error": "={{ $('Build the rows').first().json.row.error }}",
+            "received_at": "={{ $('Build the rows').first().json.row.received_at }}",
+            "pdf_base64": "={{ $('Build the rows').first().json.row.pdf_base64 }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "document_id",
+              "displayName": "document_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "kind",
+              "displayName": "kind",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "duplicate_of",
+              "displayName": "duplicate_of",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "office_id",
+              "displayName": "office_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "worker_id",
+              "displayName": "worker_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pdf_hash",
+              "displayName": "pdf_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "filename",
+              "displayName": "filename",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "stage",
+              "displayName": "stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "regex_fields",
+              "displayName": "regex_fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_fields",
+              "displayName": "llm_fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pdf_base64",
+              "displayName": "pdf_base64",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ebe07b98-cebf-51e5-8603-6c4f298c3e5f",
+      "name": "Process in the background",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        200
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "02 Process"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "232b1a78-bf4e-553e-9820-447f6bf3e3a7",
+      "name": "Answer: received",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1980,
+        200
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b876171d-0a11-5650-ab2f-aaf1db8ebafc",
+              "name": "status",
+              "value": "received",
+              "type": "string"
+            },
+            {
+              "id": "a30a87da-6c33-58d7-a723-4aecc1b9c963",
+              "name": "document_id",
+              "value": "={{ $('Build the rows').first().json.row.document_id }}",
+              "type": "string"
+            },
+            {
+              "id": "0eb0bb74-a2c7-5bc6-b68a-10c7cd50e575",
+              "name": "filename",
+              "value": "={{ $('Build the rows').first().json.row.filename }}",
+              "type": "string"
+            },
+            {
+              "id": "1d4260b4-da20-5045-843e-6912861ea4c9",
+              "name": "office_id",
+              "value": "={{ $('Build the rows').first().json.row.office_id }}",
+              "type": "string"
+            },
+            {
+              "id": "adfa3aea-8091-525a-804b-c79f3dd18436",
+              "name": "manager_id",
+              "value": "={{ $('Build the rows').first().json.row.manager_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "57806f01-64ab-5db3-9faa-d977b7a738c4",
+      "name": "Intake",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -260
+      ],
+      "parameters": {
+        "content": "One intake for every source: the Form, the console, and the AI working day. The PDF lives in the row from here on, so nothing downloads it twice.",
+        "width": 440,
+        "height": 140
+      }
+    },
+    {
+      "id": "85dd7d1b-cc3c-5f12-9b45-84a151a7a267",
+      "name": "Duplicates",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        -420
+      ],
+      "parameters": {
+        "content": "Same bytes in the same office: recorded as a duplicate, shown on the tape, never summed and never processed.",
+        "width": 380,
+        "height": 140
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate the submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate the submission": {
+      "main": [
+        [
+          {
+            "node": "Hash the PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash the PDF": {
+      "main": [
+        [
+          {
+            "node": "Seen this PDF before?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seen this PDF before?": {
+      "main": [
+        [
+          {
+            "node": "Build the rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build the rows": {
+      "main": [
+        [
+          {
+            "node": "Is it a duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is it a duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Append the duplicate row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert the office row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append the duplicate row": {
+      "main": [
+        [
+          {
+            "node": "Rebuild the office",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebuild the office": {
+      "main": [
+        [
+          {
+            "node": "Answer: duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert the office row": {
+      "main": [
+        [
+          {
+            "node": "Append the document row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append the document row": {
+      "main": [
+        [
+          {
+            "node": "Process in the background",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process in the background": {
+      "main": [
+        [
+          {
+            "node": "Answer: received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

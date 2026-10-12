@@ -1,8 +1,8 @@
 {
-  "name": "02b Write the narrative",
+  "name": "02b Write the summary",
   "nodes": [
     {
-      "id": "b9c7d9b1-d227-5b57-83a5-49a5014d5992",
+      "id": "9b272e6f-00cc-5a60-8e9b-96180db05d65",
       "name": "When Executed by Another Workflow",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -13,11 +13,11 @@
       "parameters": {
         "inputSource": "passthrough"
       },
-      "notes": "Expects customer_id and manager_id on the incoming item.",
+      "notes": "Expects office_id and manager_id on the incoming item.",
       "notesInFlow": true
     },
     {
-      "id": "167e5169-39fb-59d5-9c0c-10b9585268e1",
+      "id": "2c4cf57a-1069-5cee-8166-72c6ce9c1e4d",
       "name": "Config",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -29,19 +29,19 @@
         "assignments": {
           "assignments": [
             {
-              "id": "d3540528-eae9-5af1-8589-11791531525f",
+              "id": "f67b00b5-4e8c-5ff8-8d90-13ae3d6a398a",
               "name": "QDRANT_URL",
               "value": "https://REPLACE.cloud.qdrant.io:6333",
               "type": "string"
             },
             {
-              "id": "dabcd837-73e5-5c5a-994e-bc4e3fec5ebb",
+              "id": "ca79fc22-91c2-5f7e-96f1-ed8b23b5c2d2",
               "name": "COLLECTION",
-              "value": "customers",
+              "value": "offices",
               "type": "string"
             },
             {
-              "id": "d68687d3-1a9c-5e9c-8b9e-8fbb542f598d",
+              "id": "621860a5-aa6d-5e95-a294-b7e84e0c8139",
               "name": "OPENROUTER_MODEL",
               "value": "anthropic/claude-haiku-5.5",
               "type": "string"
@@ -53,7 +53,7 @@
       }
     },
     {
-      "id": "974019d6-a7ed-5c6b-a926-3601d4156792",
+      "id": "7ec011ac-0a95-5289-bfeb-dc1a14ae1faf",
       "name": "Hash the point id",
       "type": "n8n-nodes-base.crypto",
       "typeVersion": 2,
@@ -64,13 +64,13 @@
       "parameters": {
         "action": "hash",
         "type": "SHA256",
-        "value": "={{ $json.manager_id }}/{{ $json.customer_id }}",
+        "value": "={{ $json.manager_id }}/{{ $json.office_id }}",
         "dataPropertyName": "idhash",
         "encoding": "hex"
       }
     },
     {
-      "id": "b520a71f-67eb-5660-b3c1-2768d6150a93",
+      "id": "a14ba1bd-41d1-596c-a1df-14e1a199a4e8",
       "name": "Format the point id",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -79,11 +79,11 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Point ids and upload identity. Pasted into n8n Code nodes without the module.exports line.\n\nfunction uuidFromHex(hex) {\n  if (typeof hex !== 'string' || !/^[0-9a-f]{32,}$/i.test(hex)) {\n    throw new Error(`expected a sha-256 hex digest, got ${hex}`);\n  }\n  const h = hex.toLowerCase();\n  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;\n}\n\nfunction resolveUpload(sampleFile, workerId, workers) {\n  const slug = String(sampleFile).replace(/\\.pdf$/i, '').split('-')[0].toLowerCase();\n  if (!slug) throw new Error(`no customer slug in ${sampleFile}`);\n  if (!Object.hasOwn(workers, workerId)) throw new Error(`unknown worker ${workerId}`);\n  return { customer_id: slug, worker_id: workerId, manager_id: workers[workerId].manager_id };\n}\n\n// Glue for \"Format the point id\" in 02b Write the narrative; ids.js is pasted above it.\nconst cfg = $('Config').first().json;\nconst id = uuidFromHex($json.idhash);\nreturn [{ json: { id, body: { shard_key: cfg.manager_id, ids: [id], with_payload: true } } }];\n"
+        "jsCode": "// Point ids and static document identity. Pasted into n8n Code nodes without the module.exports line.\n\nfunction uuidFromHex(hex) {\n  if (typeof hex !== 'string' || !/^[0-9a-f]{32,}$/i.test(hex)) {\n    throw new Error(`expected a sha-256 hex digest, got ${hex}`);\n  }\n  const h = hex.toLowerCase();\n  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;\n}\n\n// A static file's tenancy comes from the committed manifest, never from the request.\nfunction resolveDocument(file, documents) {\n  if (typeof file !== 'string' || !Object.hasOwn(documents, file)) throw new Error(`unknown document ${file}`);\n  const d = documents[file];\n  return { office_id: d.office_id, manager_id: d.manager_id, worker_id: d.worker_id, duplicate_of: d.duplicate_of || null };\n}\n\n// Glue for \"Format the point id\" in 02b Write the summary; ids.js is pasted above it.\nconst cfg = $('Config').first().json;\nconst id = uuidFromHex($json.idhash);\nreturn [{ json: { id, body: { shard_key: cfg.manager_id, ids: [id], with_payload: true } } }];\n"
       }
     },
     {
-      "id": "1e685ef4-b7c6-5566-aeea-92eb010f9eab",
+      "id": "2f0725d7-f73f-564b-816a-24af8f0fcbf8",
       "name": "Read the point",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -108,7 +108,7 @@
       }
     },
     {
-      "id": "9abab9f3-88e0-5164-8a7c-eead08e146ce",
+      "id": "102c02b9-2257-596e-a2e0-8ec982e48089",
       "name": "Prepare the narrative snapshot",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -117,11 +117,11 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Glue for \"Prepare the narrative snapshot\" in 02b Write the narrative.\n// Only a sharp point is narrated: every invoice read by the vision stage, none pending. The payload travels on,\n// so the narrative is saved with the source_revision it was written from and goes stale if the rows change.\nconst cfg = $('Config').first().json;\nconst payload = (($json.result || [])[0] || {}).payload;\nif (!payload || payload.manager_id !== cfg.manager_id || payload.customer_id !== cfg.customer_id) {\n  throw new Error(`missing tenant point for ${cfg.manager_id}/${cfg.customer_id}`);\n}\nif (payload.stage !== 2 || payload.pending_count !== 0) return [];\nconst { invoice_count, open_amount, overdue_count, overdue_amount, last_invoice_at } = payload;\nconst aggregates = { invoice_count, open_amount, overdue_count, overdue_amount, last_invoice_at };\nconst lines = payload.invoices.map((i) => `${i.invoice_no} | ${i.date} | ${i.amount} EUR | due ${i.due_date} | ${i.status} | ${i.items}`);\nconst body = {\n  model: cfg.OPENROUTER_MODEL,\n  temperature: 0,\n  max_tokens: 300,\n  response_format: { type: 'json_schema', json_schema: { name: 'narrative', strict: true, schema: {\n    type: 'object', additionalProperties: false, required: ['narrative'], properties: { narrative: { type: 'string' } },\n  } } },\n  messages: [\n    { role: 'system', content: 'You write for a manager. Three plain sentences about this customer: what is open, what is overdue, what changed most recently. No bullet points.' },\n    { role: 'user', content: `Aggregates: ${JSON.stringify(aggregates)}\\nInvoices:\\n${lines.join('\\n')}` },\n  ],\n};\nreturn [{ json: { payload, body } }];\n"
+        "jsCode": "// Glue for \"Prepare the narrative snapshot\" in 02b Write the summary.\n// Only a sharp office is summarized: every document read by the vision stage, none pending, and no fresh summary yet.\n// The payload travels on, so the summary is saved with the source_revision it was written from and goes stale when\n// the rows change.\nconst cfg = $('Config').first().json;\nconst payload = (($json.result || [])[0] || {}).payload;\nif (!payload || payload.manager_id !== cfg.manager_id || payload.office_id !== cfg.office_id) {\n  throw new Error(`missing tenant point for ${cfg.manager_id}/${cfg.office_id}`);\n}\nif (payload.stage !== 2 || payload.pending_count !== 0 || payload.summary_stage === 3) return [];\nconst position = {\n  committed: payload.committed, budget: payload.budget, used_pct: payload.used_pct,\n  booked: payload.booked, deal_count: payload.deal_count,\n  lines: payload.lines.map((l) => ({ category: l.name, budget: l.budget, committed: l.committed, credited: l.credited, over_by: l.over_by })),\n};\nconst recent = payload.documents.filter((d) => d.kind !== 'duplicate').slice(-6)\n  .map((d) => `${d.doc_key} v${d.version} | ${d.status} | ${d.doc_type} | ${d.category || '-'} | ${d.amount} EUR | ${d.description_en}`);\nconst body = {\n  model: cfg.OPENROUTER_MODEL,\n  temperature: 0,\n  max_tokens: 300,\n  response_format: { type: 'json_schema', json_schema: { name: 'narrative', strict: true, schema: {\n    type: 'object', additionalProperties: false, required: ['narrative'], properties: { narrative: { type: 'string' } },\n  } } },\n  messages: [\n    { role: 'system', content: 'You write for a budget manager. Three plain sentences about this office: committed against budget, the categories over plan, the deals booked, and the most recent change, including amendments (a higher version replaces the older one). No bullet points.' },\n    { role: 'user', content: `Office: ${payload.name}\\nPosition: ${JSON.stringify(position)}\\nRecent documents, oldest first:\\n${recent.join('\\n')}` },\n  ],\n};\nreturn [{ json: { payload, body } }];\n"
       }
     },
     {
-      "id": "60d4cc18-f2f7-5a0e-918d-d8f979ce0e2f",
+      "id": "57384e2a-7863-55f7-ac5d-5676cea6864a",
       "name": "Ask for three sentences",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -151,7 +151,7 @@
       "waitBetweenTries": 2000
     },
     {
-      "id": "24bd388d-4255-510b-8800-d2fc73296411",
+      "id": "7eb8c103-4fac-53b1-94ac-7135b52e51d9",
       "name": "Keep only the narrative",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -160,11 +160,11 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Glue for \"Keep only the narrative\" in 02b Write the narrative. A bad reply stops the run: the point stays at rung 2.\nlet reply;\ntry {\n  reply = JSON.parse($json.choices[0].message.content);\n} catch {\n  throw new Error('narrative reply is not bare JSON');\n}\nif (!reply || typeof reply.narrative !== 'string' || reply.narrative.length < 20) throw new Error('bad narrative');\nconst revision = $('Prepare the narrative snapshot').first().json.payload.source_revision;\nconst at = new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\nreturn [{ json: { narrative: reply.narrative.slice(0, 600), at, revision } }];\n"
+        "jsCode": "// Glue for \"Keep only the narrative\" in 02b Write the summary. A bad reply stops the run: the office keeps its mechanical summary.\nlet reply;\ntry {\n  reply = JSON.parse($json.choices[0].message.content);\n} catch {\n  throw new Error('narrative reply is not bare JSON');\n}\nif (!reply || typeof reply.narrative !== 'string' || reply.narrative.length < 20) throw new Error('bad narrative');\nconst revision = $('Prepare the narrative snapshot').first().json.payload.source_revision;\nconst at = new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\nreturn [{ json: { narrative: reply.narrative.slice(0, 600), at, revision } }];\n"
       }
     },
     {
-      "id": "8cc704d6-b8d8-521b-a7de-93c628d75bd7",
+      "id": "91035a68-aa59-51e9-900b-66d928bcce1b",
       "name": "Save the narrative",
       "type": "n8n-nodes-base.dataTable",
       "typeVersion": 1.1,
@@ -178,15 +178,15 @@
         "dataTableId": {
           "__rl": true,
           "mode": "name",
-          "value": "customers"
+          "value": "offices"
         },
         "matchType": "allConditions",
         "filters": {
           "conditions": [
             {
-              "keyName": "customer_id",
+              "keyName": "office_id",
               "condition": "eq",
-              "keyValue": "={{ $('Config').first().json.customer_id }}"
+              "keyValue": "={{ $('Config').first().json.office_id }}"
             },
             {
               "keyName": "manager_id",
@@ -242,7 +242,7 @@
       }
     },
     {
-      "id": "53b9097e-2a68-55f4-9cf0-da8dfc3382fa",
+      "id": "4b961b07-3e2e-5930-92a3-b45ea9516a91",
       "name": "Rebuild the point",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
@@ -255,15 +255,16 @@
           "__rl": true,
           "value": "",
           "mode": "list",
-          "cachedResultName": "03 Rebuild point"
+          "cachedResultName": "03 Rebuild office point"
         },
+        "mode": "once",
         "options": {
           "waitForSubWorkflow": true
         }
       }
     },
     {
-      "id": "0596c660-3bb4-5fac-84e3-e1be38c1b5be",
+      "id": "18f4ec50-980a-5cec-b2b2-b9590b3d33a8",
       "name": "Sticky Note",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -272,7 +273,7 @@
         -220
       ],
       "parameters": {
-        "content": "Narrates only a sharp point: every invoice read, none pending. The narrative is saved with the source_revision it describes and goes stale when the rows change.",
+        "content": "Summarizes only a sharp office: every document read, none pending, no fresh summary yet. Saved with the source_revision it describes; stale when rows change.",
         "width": 380,
         "height": 140
       }
@@ -378,16 +379,6 @@
         ]
       ]
     }
-  },
-  "pinData": {
-    "When Executed by Another Workflow": [
-      {
-        "json": {
-          "customer_id": "acme",
-          "manager_id": "m_anna"
-        }
-      }
-    ]
   },
   "settings": {
     "executionOrder": "v1"

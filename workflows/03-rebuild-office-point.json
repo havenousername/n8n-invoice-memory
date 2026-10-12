@@ -1,0 +1,312 @@
+{
+  "name": "03 Rebuild office point",
+  "nodes": [
+    {
+      "id": "a52ad159-2dab-504e-92d5-8465d03bf34e",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "notes": "Expects office_id and manager_id on the incoming item. Returns them with the point id.",
+      "notesInFlow": true
+    },
+    {
+      "id": "900a09b0-4f23-5e92-95e3-c7c3e70c4c18",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d45b0e9c-70d4-5352-ac8c-cf0d29d9396b",
+              "name": "QDRANT_URL",
+              "value": "https://REPLACE.cloud.qdrant.io:6333",
+              "type": "string"
+            },
+            {
+              "id": "20a4a79b-8004-58d0-8ba7-a3c858db1241",
+              "name": "COLLECTION",
+              "value": "offices",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "60c73115-5a97-589c-96ce-90ee8951a829",
+      "name": "Hash the point id",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "value": "={{ $json.manager_id }}/{{ $json.office_id }}",
+        "dataPropertyName": "idhash",
+        "encoding": "hex"
+      }
+    },
+    {
+      "id": "2fee4e88-4453-5155-8c55-5919461cda3d",
+      "name": "Load the office row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "offices"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "office_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.office_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.manager_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "88b49b7e-61af-57a4-9162-a50c898daa2e",
+      "name": "Load all document rows",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "documents"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "office_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.office_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.manager_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "eda0e267-1d94-5f41-a5f4-36745e74ca86",
+      "name": "Compute the view",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const OFFICES = [{\"office_id\": \"berlin\", \"code\": \"ber\", \"name\": \"Berlin\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_tom\", \"worker_name\": \"Tom\", \"cost_center\": \"CC-BER-01\", \"budgets\": {\"people\": 820000, \"cloud\": 180000, \"gpu\": 120000, \"office\": 95000, \"travel\": 60000}}, {\"office_id\": \"munich\", \"code\": \"muc\", \"name\": \"Munich\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_tom\", \"worker_name\": \"Tom\", \"cost_center\": \"CC-MUC-01\", \"budgets\": {\"people\": 760000, \"cloud\": 140000, \"gpu\": 210000, \"office\": 90000, \"travel\": 50000}}, {\"office_id\": \"vienna\", \"code\": \"vie\", \"name\": \"Vienna\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_lena\", \"worker_name\": \"Lena\", \"cost_center\": \"CC-VIE-01\", \"budgets\": {\"people\": 540000, \"cloud\": 90000, \"gpu\": 60000, \"office\": 70000, \"travel\": 40000}}, {\"office_id\": \"amsterdam\", \"code\": \"ams\", \"name\": \"Amsterdam\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_jules\", \"worker_name\": \"Jules\", \"cost_center\": \"CC-AMS-01\", \"budgets\": {\"people\": 610000, \"cloud\": 150000, \"gpu\": 90000, \"office\": 80000, \"travel\": 55000}}, {\"office_id\": \"paris\", \"code\": \"par\", \"name\": \"Paris\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_jules\", \"worker_name\": \"Jules\", \"cost_center\": \"CC-PAR-01\", \"budgets\": {\"people\": 700000, \"cloud\": 120000, \"gpu\": 140000, \"office\": 110000, \"travel\": 70000}}, {\"office_id\": \"london\", \"code\": \"lon\", \"name\": \"London\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_mia\", \"worker_name\": \"Mia\", \"cost_center\": \"CC-LON-01\", \"budgets\": {\"people\": 880000, \"cloud\": 200000, \"gpu\": 160000, \"office\": 130000, \"travel\": 90000}}];\n// Point ids and static document identity. Pasted into n8n Code nodes without the module.exports line.\n\nfunction uuidFromHex(hex) {\n  if (typeof hex !== 'string' || !/^[0-9a-f]{32,}$/i.test(hex)) {\n    throw new Error(`expected a sha-256 hex digest, got ${hex}`);\n  }\n  const h = hex.toLowerCase();\n  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;\n}\n\n// A static file's tenancy comes from the committed manifest, never from the request.\nfunction resolveDocument(file, documents) {\n  if (typeof file !== 'string' || !Object.hasOwn(documents, file)) throw new Error(`unknown document ${file}`);\n  const d = documents[file];\n  return { office_id: d.office_id, manager_id: d.manager_id, worker_id: d.worker_id, duplicate_of: d.duplicate_of || null };\n}\n\n// The office point as a view over documents rows. Pasted into n8n Code nodes without the module.exports line.\n\nconst VIEW_CATEGORIES = [['people', 'People'], ['cloud', 'Cloud infrastructure'], ['gpu', 'GPU compute'], ['office', 'Office and facilities'], ['travel', 'Travel and events']];\nconst VIEW_TYPE_NAMES = { cost: 'Commitment', deal: 'Deal', credit: 'Credit note' };\n\nfunction computeOfficeView(office, rows, budgets, nowIso) {\n  const entries = rows.map(viewEntry).sort((a, b) => a.received_at.localeCompare(b.received_at));\n  markCurrentVersions(entries);\n  const current = entries.filter((e) => e.status === 'current');\n  const pending = entries.filter((e) => e.status === 'pending');\n\n  const costs = {}, credits = {};\n  let booked = 0, dealCount = 0;\n  for (const e of current) {\n    if (e.amount === null) continue;\n    if (e.doc_type === 'deal') { booked += e.amount; dealCount += 1; }\n    else if (e.doc_type === 'cost' && e.category) costs[e.category] = (costs[e.category] || 0) + e.amount;\n    else if (e.doc_type === 'credit' && e.category) credits[e.category] = (credits[e.category] || 0) + e.amount;\n  }\n  const lines = VIEW_CATEGORIES.map(([category, name]) => {\n    const budget = budgets[category] || 0;\n    const committed = round2(Math.max(0, (costs[category] || 0) - (credits[category] || 0)));\n    return { category, name, budget, committed, credited: round2(credits[category] || 0),\n      remaining: round2(budget - committed), over_by: round2(Math.max(0, committed - budget)) };\n  });\n  const budget = lines.reduce((s, l) => s + l.budget, 0);\n  const committed = round2(lines.reduce((s, l) => s + l.committed, 0));\n\n  // An error counts as rough (stage 1) for the stage but is terminal, so it is not pending.\n  const effective = (e) => (e.stage < 0 ? 1 : e.stage);\n  const stage = [...current, ...pending].reduce((min, e) => Math.min(min, effective(e)), Infinity);\n  const pendingCount = pending.length + current.filter((e) => e.stage === 1).length;\n  const revision = sourceRevision(rows);\n  const newest = entries[entries.length - 1] || null;\n  const fresh = stage === 2 && pendingCount === 0 && !!office.narrative && office.narrative_revision === revision;\n  const over = lines.filter((l) => l.over_by > 0);\n  const mechanical = `${office.name}: ${viewMoney(committed)} of ${viewMoney(budget)} committed (${pct(committed, budget)}%), `\n    + (over.length ? `over plan in ${over.map((l) => l.name).join(' and ')}` : 'nothing over plan')\n    + `, ${dealCount} ${dealCount === 1 ? 'deal' : 'deals'} booked worth ${viewMoney(round2(booked))}.`;\n\n  const payload = {\n    office_id: office.office_id, manager_id: office.manager_id, name: office.name, region: office.region,\n    stage: stage === Infinity ? 0 : stage, pending_count: pendingCount,\n    lines, budget, committed, used_pct: pct(committed, budget), booked: round2(booked), deal_count: dealCount,\n    documents: entries.map(({ text, ...rest }) => rest),\n    superseded_count: entries.filter((e) => e.status === 'superseded').length,\n    duplicate_count: entries.filter((e) => e.status === 'duplicate').length,\n    latest: newest && { document_id: newest.document_id, kind: newest.kind, doc_type: newest.doc_type, doc_key: newest.doc_key,\n      version: newest.version, stage: newest.stage, amount: newest.amount, status: newest.status, received_at: newest.received_at },\n    source_revision: revision,\n    summary_stage: fresh ? 3 : 1,\n    summary_text: fresh ? office.narrative : mechanical,\n    summary_generated_at: fresh ? office.narrative_at : nowIso,\n    updated_at: nowIso,\n  };\n  const descriptions = current.map((e) => e.description_en).filter(Boolean);\n  return {\n    payload,\n    texts: {\n      summary: payload.summary_text,\n      digest: current.map(digestOf).join('\\n') || 'no documents',\n      bm25: [...rows.map((r) => r.text || ''), ...descriptions].join('\\n').trim() || 'no text',\n    },\n  };\n}\n\n// What was read: the vision fields once sharp, the regex fields while rough or after an error.\nfunction viewEntry(row) {\n  const stage = Number(row.stage);\n  const kind = row.kind === 'duplicate' ? 'duplicate' : 'document';\n  const f = stage === 0 || kind === 'duplicate' ? {} : parseJsonObject(stage >= 2 ? row.llm_fields : row.regex_fields);\n  return {\n    document_id: row.document_id, kind, duplicate_of: row.duplicate_of || null, filename: row.filename || null,\n    doc_type: f.doc_type || null, doc_key: f.doc_key || null, version: Number.isInteger(f.version) ? f.version : null,\n    counterparty: f.counterparty || null, category: f.category || null,\n    amount: Number.isFinite(f.amount) ? f.amount : null, description_en: f.description_en || null, date: f.date || null,\n    stage, error: row.error || '', received_at: String(row.received_at || ''), text: row.text || '',\n    status: kind === 'duplicate' ? 'duplicate' : stage === 0 ? 'pending' : 'current',\n  };\n}\n\n// Per key, the highest version read is current; ties go to the latest received. Unkeyed reads stand alone.\nfunction markCurrentVersions(entries) {\n  const best = {};\n  for (const e of entries) {\n    if (e.status !== 'current' || !e.doc_key) continue;\n    const held = best[e.doc_key];\n    if (!held || (e.version ?? 0) > (held.version ?? 0) || ((e.version ?? 0) === (held.version ?? 0) && e.received_at >= held.received_at)) {\n      if (held) held.status = 'superseded';\n      best[e.doc_key] = e;\n    } else {\n      e.status = 'superseded';\n    }\n  }\n}\n\nfunction parseJsonObject(text) {\n  try {\n    const value = JSON.parse(text || '{}');\n    return value && typeof value === 'object' ? value : {};\n  } catch {\n    return {};\n  }\n}\n\n// Fingerprint of the rows a summary was written from; any change makes the summary stale.\nfunction sourceRevision(rows) {\n  const tuples = rows.map((r) => [r.document_id, r.kind || 'document', r.duplicate_of || '', r.stage, r.regex_fields || '{}',\n    r.llm_fields || '{}', r.error || '', r.received_at || '']);\n  return JSON.stringify(tuples.sort((a, b) => String(a[0]).localeCompare(String(b[0]))));\n}\n\nfunction digestOf(e) {\n  const category = VIEW_CATEGORIES.find(([key]) => key === e.category);\n  const amount = e.amount === null ? '?' : e.amount.toFixed(2);\n  return `${e.doc_key || '?'} v${e.version ?? '?'} | ${e.date || '?'} | ${VIEW_TYPE_NAMES[e.doc_type] || '?'} | `\n    + `${category ? category[1] : '-'} | ${e.counterparty || '?'} | ${amount} EUR | ${e.description_en || ''}`;\n}\n\nfunction round2(n) {\n  return Math.round(n * 100) / 100;\n}\n\nfunction pct(part, whole) {\n  return whole ? Math.round((part / whole) * 1000) / 10 : 0;\n}\n\nfunction viewMoney(n) {\n  return `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`;\n}\n\n// Glue for the \"Compute the view\" Code node in 03 Rebuild office point.\n// build_workflows.py pastes OFFICES, ids.js, and office-view.js above this; n8n runs the whole as a function body.\n// Name, region, and budgets come from OFFICES; the office row only adds the saved summary.\nconst cfg = $('Config').first().json;\nconst office = OFFICES.find((o) => o.office_id === cfg.office_id);\nif (!office || office.manager_id !== cfg.manager_id) throw new Error(`unknown office ${cfg.manager_id}/${cfg.office_id}`);\nconst officeRows = $('Load the office row').all().map((i) => i.json).filter((r) => r.office_id);\nif (officeRows.length > 1) throw new Error(`${officeRows.length} office rows for ${cfg.manager_id}/${cfg.office_id}`);\nconst saved = officeRows[0] || {};\nconst rows = $('Load all document rows').all().map((i) => i.json).filter((r) => r.document_id);\nconst now = new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\nconst { payload, texts } = computeOfficeView(\n  { ...office, narrative: saved.narrative, narrative_at: saved.narrative_at, narrative_revision: saved.narrative_revision },\n  rows, office.budgets, now);\nconst id = uuidFromHex($('Hash the point id').first().json.idhash);\nreturn [{ json: { body: {\n  shard_key: cfg.manager_id,\n  points: [{ id, payload, vector: {\n    summary: { text: texts.summary, model: 'sentence-transformers/all-minilm-l6-v2' },\n    digest: { text: texts.digest, model: 'answerdotai/answerai-colbert-small-v1' },\n    bm25: { text: texts.bm25, model: 'qdrant/bm25' },\n  } }],\n} } }];\n"
+      }
+    },
+    {
+      "id": "76460fec-d419-53e7-866c-7f98cb02a9f4",
+      "name": "Upsert the point with inference",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Config').first().json.QDRANT_URL }}/collections/{{ $('Config').first().json.COLLECTION }}/points?wait=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Qdrant api-key"
+        }
+      }
+    },
+    {
+      "id": "0fd022a0-58ba-57c4-abdd-90e69bcacfd2",
+      "name": "Return what was rebuilt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7f2f2506-bdf6-5da9-a228-e810ce7b5538",
+              "name": "office_id",
+              "value": "={{ $('Config').first().json.office_id }}",
+              "type": "string"
+            },
+            {
+              "id": "12cafdc0-aaaf-5c67-ae47-1383d0c63a4e",
+              "name": "manager_id",
+              "value": "={{ $('Config').first().json.manager_id }}",
+              "type": "string"
+            },
+            {
+              "id": "66d6e3f3-ffc9-5d6f-be15-d21bb1dfad27",
+              "name": "point_id",
+              "value": "={{ $('Compute the view').first().json.body.points[0].id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "b86895cc-4399-5863-9a41-7657e70c342a",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        -220
+      ],
+      "parameters": {
+        "content": "Source of truth is the documents table. This workflow is the only writer to Qdrant: one point per office, any stage, any retry, same point.",
+        "width": 380,
+        "height": 140
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Hash the point id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash the point id": {
+      "main": [
+        [
+          {
+            "node": "Load the office row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load the office row": {
+      "main": [
+        [
+          {
+            "node": "Load all document rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all document rows": {
+      "main": [
+        [
+          {
+            "node": "Compute the view",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute the view": {
+      "main": [
+        [
+          {
+            "node": "Upsert the point with inference",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert the point with inference": {
+      "main": [
+        [
+          {
+            "node": "Return what was rebuilt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

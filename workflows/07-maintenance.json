@@ -1,0 +1,358 @@
+{
+  "name": "07 Maintenance",
+  "nodes": [
+    {
+      "id": "219fd041-ef71-55a7-82e5-cb4a73626b55",
+      "name": "Reset",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reset",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Dashboard secret"
+        }
+      },
+      "webhookId": "f9bea6e6-1081-5f23-8c13-7d220168f1ca"
+    },
+    {
+      "id": "2898bc65-51e0-5d8e-8ccd-77ec29969f2f",
+      "name": "Stop the day",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "simulation"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "name",
+              "condition": "eq",
+              "keyValue": "day"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "day",
+            "running": "={{ false }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "running",
+              "displayName": "running",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3c45e5bb-fee8-5863-942d-0a53b671b737",
+      "name": "Clear the documents",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "clear",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "documents"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ef31f960-040b-53d7-8401-30a60dace910",
+      "name": "Clear the offices",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "clear",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "offices"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "300b11b2-8f90-5d6e-aaf9-11f818d45a58",
+      "name": "Clear the issued log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "clear",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "issued"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ef023dc9-6624-5740-8b0a-fcfe4d7d0071",
+      "name": "Answer reset",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { reset: true } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "44341c37-bab3-5b16-bc3a-097232634e6e",
+      "name": "Rebuild the empty offices",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "06 Reconcile"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "269dc217-2b4f-5aff-bd44-8fafe6cd73bc",
+      "name": "Issued",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "issued",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Dashboard secret"
+        }
+      },
+      "webhookId": "ee9f3aa7-5b56-51dc-b672-7dd1e041e5f0"
+    },
+    {
+      "id": "6b999fb8-248b-5e86-b4c6-31fc7ff22833",
+      "name": "Read the issued log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        400
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "issued"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": []
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "02e72054-3ac3-5fa2-9d44-3d14d868e7f3",
+      "name": "Answer with the issued rows",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        440,
+        400
+      ],
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      }
+    },
+    {
+      "id": "09239b3b-5dad-5ef0-b2dc-3eeb08da2170",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -240
+      ],
+      "parameters": {
+        "content": "Reset empties the tables and rebuilds the six offices empty, so the dashboard shows a fresh morning. GET /issued is the ground truth for scripts/burst_check.py.",
+        "width": 460,
+        "height": 140
+      }
+    }
+  ],
+  "connections": {
+    "Reset": {
+      "main": [
+        [
+          {
+            "node": "Stop the day",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stop the day": {
+      "main": [
+        [
+          {
+            "node": "Clear the documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear the documents": {
+      "main": [
+        [
+          {
+            "node": "Clear the offices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear the offices": {
+      "main": [
+        [
+          {
+            "node": "Clear the issued log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear the issued log": {
+      "main": [
+        [
+          {
+            "node": "Answer reset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer reset": {
+      "main": [
+        [
+          {
+            "node": "Rebuild the empty offices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issued": {
+      "main": [
+        [
+          {
+            "node": "Read the issued log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the issued log": {
+      "main": [
+        [
+          {
+            "node": "Answer with the issued rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

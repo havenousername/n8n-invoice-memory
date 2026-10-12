@@ -13,7 +13,7 @@
       "parameters": {
         "inputSource": "passthrough"
       },
-      "notes": "Expects the invoice row 01 Ingest appended: invoice_id and filename, plus customer_id and manager_id.",
+      "notes": "Expects the document row 01b appended: document_id, office_id, manager_id, filename, and pdf_base64.",
       "notesInFlow": true
     },
     {
@@ -39,12 +39,6 @@
               "name": "PDF_ENGINE",
               "value": "native",
               "type": "string"
-            },
-            {
-              "id": "19efa4a2-9c51-5f51-a330-cacb310403b6",
-              "name": "SAMPLES_BASE_URL",
-              "value": "https://raw.githubusercontent.com/havenousername/n8n-invoice-memory/main/samples",
-              "type": "string"
             }
           ]
         },
@@ -66,33 +60,25 @@
           "__rl": true,
           "value": "",
           "mode": "list",
-          "cachedResultName": "03 Rebuild point"
+          "cachedResultName": "03 Rebuild office point"
         },
+        "mode": "once",
         "options": {
           "waitForSubWorkflow": true
         }
       }
     },
     {
-      "id": "1a7bd5af-fcf3-5a85-b032-a78ba28cfc91",
-      "name": "Download the PDF for processing",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "65a3876b-d7f9-5612-a4e7-7fb74e18142f",
+      "name": "Read the PDF from the row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         660,
         0
       ],
       "parameters": {
-        "method": "GET",
-        "url": "={{ $('Config').first().json.SAMPLES_BASE_URL }}/{{ encodeURIComponent($('Config').first().json.filename) }}",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "file",
-              "outputPropertyName": "data"
-            }
-          }
-        }
+        "jsCode": "// Glue for \"Read the PDF from the row\" in 02 Process. The documents row holds the PDF; it becomes the binary that\n// \"Pull the text out of the PDF\" reads. Nothing is downloaded.\nconst cfg = $('Config').first().json;\nif (typeof cfg.pdf_base64 !== 'string' || !cfg.pdf_base64.startsWith('JVBERi0')) throw new Error(`no PDF in the row for ${cfg.document_id}`);\nconst data = await this.helpers.prepareBinaryData(Buffer.from(cfg.pdf_base64, 'base64'), cfg.filename, 'application/pdf');\nreturn [{ json: { document_id: cfg.document_id }, binary: { data } }];\n"
       },
       "onError": "continueErrorOutput"
     },
@@ -106,7 +92,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const VISION_REQUEST_TEMPLATE = {\"model\": \"\", \"temperature\": 0, \"max_tokens\": 400, \"response_format\": {\"type\": \"json_schema\", \"json_schema\": {\"name\": \"invoice\", \"strict\": true, \"schema\": {\"type\": \"object\", \"properties\": {\"invoice_no\": {\"type\": \"string\"}, \"date\": {\"type\": \"string\", \"description\": \"YYYY-MM-DD\"}, \"due_date\": {\"type\": \"string\", \"description\": \"YYYY-MM-DD\"}, \"amount\": {\"type\": \"number\", \"description\": \"total in EUR\"}, \"vendor\": {\"type\": \"string\"}, \"customer_name\": {\"type\": \"string\"}, \"status\": {\"type\": \"string\", \"enum\": [\"open\", \"paid\", \"overdue\"]}, \"line_items_summary\": {\"type\": \"string\", \"description\": \"max 12 words\"}}, \"required\": [\"invoice_no\", \"date\", \"due_date\", \"amount\", \"vendor\", \"customer_name\", \"status\", \"line_items_summary\"], \"additionalProperties\": false}}}, \"plugins\": [{\"id\": \"file-parser\", \"pdf\": {\"engine\": \"\"}}], \"messages\": [{\"role\": \"system\", \"content\": \"You read one invoice PDF and return JSON only with keys: invoice_no, date (YYYY-MM-DD), due_date (YYYY-MM-DD), amount (number in EUR, no thousands separators), vendor, customer_name, status (one of: open, paid, overdue), line_items_summary (max 12 words).\"}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Extract the fields.\"}, {\"type\": \"file\", \"file\": {\"filename\": \"invoice.pdf\", \"file_data\": \"data:application/pdf;base64,\"}}]}]};\n// Glue for \"Prepare the vision request\" in 02 Process. build_workflows.py injects VISION_REQUEST_TEMPLATE above it:\n// scripts/openrouter_check.py's extraction_body with an empty PDF, so n8n sends the request the live gate tested.\n// The binary passes through for \"Pull the text out of the PDF\".\nconst cfg = $('Config').first().json;\nconst pdf = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst body = JSON.parse(JSON.stringify(VISION_REQUEST_TEMPLATE));\nbody.model = cfg.OPENROUTER_MODEL;\nbody.plugins[0].pdf.engine = cfg.PDF_ENGINE;\nbody.messages[1].content.find((part) => part.type === 'file').file.file_data += pdf.toString('base64');\nreturn [{ json: { body }, binary: $input.first().binary }];\n"
+        "jsCode": "const VISION_REQUEST_TEMPLATE = {\"model\": \"\", \"temperature\": 0, \"max_tokens\": 400, \"response_format\": {\"type\": \"json_schema\", \"json_schema\": {\"name\": \"office_document\", \"strict\": true, \"schema\": {\"type\": \"object\", \"properties\": {\"doc_type\": {\"type\": \"string\", \"enum\": [\"cost\", \"deal\", \"credit\"]}, \"doc_key\": {\"type\": \"string\", \"description\": \"Belegnummer, for example PO-1042\"}, \"version\": {\"type\": \"integer\"}, \"cost_center\": {\"type\": \"string\", \"description\": \"Kostenstelle, for example CC-BER-01\"}, \"date\": {\"type\": \"string\", \"description\": \"YYYY-MM-DD, converted from the German DD.MM.YYYY\"}, \"counterparty\": {\"type\": \"string\"}, \"category\": {\"type\": \"string\", \"enum\": [\"people\", \"cloud\", \"gpu\", \"office\", \"travel\", \"none\"]}, \"amount\": {\"type\": \"number\", \"description\": \"EUR as a plain number, converted from German format\"}, \"description_en\": {\"type\": \"string\", \"description\": \"the Beschreibung as one English sentence\"}}, \"required\": [\"doc_type\", \"doc_key\", \"version\", \"cost_center\", \"date\", \"counterparty\", \"category\", \"amount\", \"description_en\"], \"additionalProperties\": false}}}, \"plugins\": [{\"id\": \"file-parser\", \"pdf\": {\"engine\": \"\"}}], \"messages\": [{\"role\": \"system\", \"content\": \"You read one German business document of Q8nten GmbH: a Bestellung (purchase commitment), a Kundenauftrag (client deal), or a Gutschrift (credit note). Return JSON only with these keys: doc_type (cost for Bestellung, deal for Kundenauftrag, credit for Gutschrift), doc_key (the Belegnummer, for example PO-1042), version (the integer after Version), cost_center (the Kostenstelle, for example CC-BER-01), date (Datum, written DD.MM.YYYY in the document, returned as YYYY-MM-DD), counterparty (the Lieferant or Kunde), category (people for Personal, cloud for Cloud-Infrastruktur, gpu for GPU-Rechenleistung, office for Büro und Ausstattung, travel for Reisen und Events, none for a Kundenauftrag), amount (Betrag or Auftragswert as a number: German format uses dots for thousands and a comma for decimals, so 12.300,00 € is 12300), description_en (the Beschreibung translated to one English sentence).\"}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Extract the fields.\"}, {\"type\": \"file\", \"file\": {\"filename\": \"document.pdf\", \"file_data\": \"data:application/pdf;base64,\"}}]}]};\n// Glue for \"Prepare the vision request\" in 02 Process. build_workflows.py injects VISION_REQUEST_TEMPLATE above it:\n// scripts/openrouter_check.py's extraction_body with an empty PDF, so n8n sends the request the live gate tested.\n// The PDF comes from the row; the binary passes through for \"Pull the text out of the PDF\".\nconst cfg = $('Config').first().json;\nconst body = JSON.parse(JSON.stringify(VISION_REQUEST_TEMPLATE));\nbody.model = cfg.OPENROUTER_MODEL;\nbody.plugins[0].pdf.engine = cfg.PDF_ENGINE;\nbody.messages[1].content.find((part) => part.type === 'file').file.file_data += cfg.pdf_base64;\nreturn [{ json: { body }, binary: $input.first().binary }];\n"
       },
       "onError": "continueErrorOutput"
     },
@@ -136,7 +122,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Stage 1: a regex read of the extracted PDF text. Pasted into n8n Code nodes without the module.exports line.\n// ponytail: deliberately naive. \"4,250.00\" parses right, \"12.300,00\" parses as 12.3; the vision stage corrects it.\n\nfunction coarseRead(text) {\n  const t = text || '';\n  const grab = (re) => {\n    const m = t.match(re);\n    return m ? m[1].trim() : null;\n  };\n  const rawTotal = grab(/total[^0-9]*([0-9][0-9.,]*)/i);\n  return {\n    invoice_no: grab(/invoice\\s*(?:no\\.?|number|#)\\s*[:#]?\\s*([A-Z0-9-]+)/i),\n    date: grab(/(?<!due\\s)date\\s*:?\\s*(\\d{4}-\\d{2}-\\d{2})/i),\n    due_date: grab(/due\\s*(?:date)?\\s*:?\\s*(\\d{4}-\\d{2}-\\d{2})/i),\n    amount: rawTotal === null ? null : parseFloat(rawTotal.replace(/,/g, '')),\n    vendor: grab(/from\\s*:?\\s*([^\\n]+)/i),\n  };\n}\n\n// Glue for \"Coarse read with regex\" in 02 Process; coarse.js is pasted above it. Empty text (a scanned PDF) is valid.\nconst text = $json.text || '';\nreturn [{ json: { regex_fields: JSON.stringify(coarseRead(text)), text } }];\n"
+        "jsCode": "// Stage 1: a regex read of the extracted PDF text. Pasted into n8n Code nodes without the module.exports line.\n// ponytail: deliberately naive about money. Commas are dropped, so the German \"12.300,00 €\" reads as 12.3;\n// the vision stage corrects it. Every other field is read properly.\n\nconst COARSE_LABELS = ['Belegnummer', 'Version', 'Datum', 'Kostenstelle', 'Standort', 'Lieferant', 'Kunde', 'Kategorie',\n  'Beschreibung', 'Betrag', 'Auftragswert', 'Eingereicht von', 'Synthetischer Beleg'];\n// A value ends at the end of its line or where the next label starts, so flattened text reads the same.\nconst COARSE_UNTIL = `(?=\\\\s+(?:${COARSE_LABELS.join('|')})\\\\b|\\\\n|$)`;\nconst COARSE_TYPES = { BESTELLUNG: 'cost', KUNDENAUFTRAG: 'deal', GUTSCHRIFT: 'credit' };\nconst COARSE_CATEGORIES = {\n  'Personal': 'people', 'Cloud-Infrastruktur': 'cloud', 'GPU-Rechenleistung': 'gpu',\n  'Büro und Ausstattung': 'office', 'Reisen und Events': 'travel',\n};\n\nfunction coarseRead(text) {\n  const t = text || '';\n  const grab = (re) => {\n    const m = t.match(re);\n    return m ? m[1].trim() : null;\n  };\n  const title = grab(/\\b(BESTELLUNG|KUNDENAUFTRAG|GUTSCHRIFT)\\b/);\n  const version = grab(/Version:\\s*(\\d+)/);\n  const date = t.match(/Datum:\\s*(\\d{2})\\.(\\d{2})\\.(\\d{4})/);\n  const category = grab(new RegExp(`Kategorie:\\\\s*(.+?)${COARSE_UNTIL}`));\n  const rawAmount = grab(/(?:Betrag|Auftragswert):\\s*([0-9][0-9.,]*)/);\n  return {\n    doc_type: title ? COARSE_TYPES[title] : null,\n    doc_key: grab(/Belegnummer:\\s*((?:PO|DEAL|CN)-\\d{4})/),\n    version: version === null ? null : Number(version),\n    date: date ? `${date[3]}-${date[2]}-${date[1]}` : null,\n    cost_center: grab(/Kostenstelle:\\s*(CC-[A-Z]{3}-\\d{2})/),\n    counterparty: grab(new RegExp(`(?:Lieferant|Kunde):\\\\s*(.+?)${COARSE_UNTIL}`)),\n    category: category !== null && Object.hasOwn(COARSE_CATEGORIES, category) ? COARSE_CATEGORIES[category] : null,\n    amount: rawAmount === null ? null : parseFloat(rawAmount.replace(/,/g, '')),\n  };\n}\n\n// Glue for \"Coarse read with regex\" in 02 Process; coarse.js is pasted above it. Empty text (a scanned PDF) is valid.\nconst text = $json.text || '';\nreturn [{ json: { regex_fields: JSON.stringify(coarseRead(text)), text } }];\n"
       }
     },
     {
@@ -154,20 +140,20 @@
         "dataTableId": {
           "__rl": true,
           "mode": "name",
-          "value": "invoices"
+          "value": "documents"
         },
         "matchType": "allConditions",
         "filters": {
           "conditions": [
             {
-              "keyName": "invoice_id",
+              "keyName": "document_id",
               "condition": "eq",
-              "keyValue": "={{ $('Config').first().json.invoice_id }}"
+              "keyValue": "={{ $('Config').first().json.document_id }}"
             },
             {
-              "keyName": "customer_id",
+              "keyName": "office_id",
               "condition": "eq",
-              "keyValue": "={{ $('Config').first().json.customer_id }}"
+              "keyValue": "={{ $('Config').first().json.office_id }}"
             },
             {
               "keyName": "manager_id",
@@ -223,8 +209,8 @@
       }
     },
     {
-      "id": "2a19a9bd-fa4d-5508-8fde-9c511a49fd05",
-      "name": "Show the coarse view",
+      "id": "836d9ee8-70f9-5d40-96d7-47679ceaddc1",
+      "name": "Show the rough view",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
@@ -236,8 +222,9 @@
           "__rl": true,
           "value": "",
           "mode": "list",
-          "cachedResultName": "03 Rebuild point"
+          "cachedResultName": "03 Rebuild office point"
         },
+        "mode": "once",
         "options": {
           "waitForSubWorkflow": true
         }
@@ -284,7 +271,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Stage 2: validate what the vision model returned. Pasted into n8n Code nodes without the module.exports line.\n\nconst INVOICE_STATUSES = ['open', 'paid', 'overdue'];\nconst REQUIRED_INVOICE_FIELDS = ['invoice_no', 'date', 'due_date', 'amount', 'vendor', 'customer_name', 'status'];\n\n// Formatted amounts: the later of \",\" and \".\" is the decimal point; a lone separator followed by exactly\n// three digits is a thousands separator (EUR never has three decimals); repeated separators are thousands.\nfunction toNumber(value) {\n  if (typeof value === 'number') return value;\n  const s = String(value ?? '').replace(/[^\\d.,-]/g, '');\n  if (!/\\d/.test(s)) return NaN;\n  const commas = (s.match(/,/g) || []).length;\n  const dots = (s.match(/\\./g) || []).length;\n  if (commas && dots) {\n    return Number(s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\\./g, '').replace(',', '.') : s.replace(/,/g, ''));\n  }\n  if (!commas && !dots) return Number(s);\n  const separator = commas ? ',' : '.';\n  const digitsAfter = s.length - s.lastIndexOf(separator) - 1;\n  const isThousands = commas + dots > 1 || digitsAfter === 3;\n  return Number(isThousands ? s.split(separator).join('') : s.replace(separator, '.'));\n}\n\nfunction validateFields(obj) {\n  if (!obj || typeof obj !== 'object') throw new Error('expected a JSON object');\n  for (const key of REQUIRED_INVOICE_FIELDS) {\n    if (obj[key] === undefined || obj[key] === null || obj[key] === '') throw new Error(`missing ${key}`);\n  }\n  const amount = toNumber(obj.amount);\n  if (!Number.isFinite(amount)) throw new Error(`amount not numeric: ${obj.amount}`);\n  const status = String(obj.status).trim().toLowerCase();\n  if (!INVOICE_STATUSES.includes(status)) throw new Error(`bad status ${obj.status}`);\n  for (const key of ['date', 'due_date']) {\n    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(obj[key])) throw new Error(`bad ${key} ${obj[key]}`);\n  }\n  return {\n    invoice_no: String(obj.invoice_no),\n    date: obj.date,\n    due_date: obj.due_date,\n    amount,\n    vendor: String(obj.vendor),\n    customer_name: String(obj.customer_name),\n    status,\n    line_items_summary: String(obj.line_items_summary || '').slice(0, 120),\n  };\n}\n\n// Glue for \"Validate the fields\" in 02 Process; validate.js is pasted above it. A throw goes to the error output.\nlet reply;\ntry {\n  reply = JSON.parse($json.choices[0].message.content);\n} catch {\n  throw new Error('vision reply is not bare JSON');\n}\nreturn [{ json: { llm_fields: JSON.stringify(validateFields(reply)) } }];\n"
+        "jsCode": "const OFFICES = [{\"office_id\": \"berlin\", \"code\": \"ber\", \"name\": \"Berlin\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_tom\", \"worker_name\": \"Tom\", \"cost_center\": \"CC-BER-01\", \"budgets\": {\"people\": 820000, \"cloud\": 180000, \"gpu\": 120000, \"office\": 95000, \"travel\": 60000}}, {\"office_id\": \"munich\", \"code\": \"muc\", \"name\": \"Munich\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_tom\", \"worker_name\": \"Tom\", \"cost_center\": \"CC-MUC-01\", \"budgets\": {\"people\": 760000, \"cloud\": 140000, \"gpu\": 210000, \"office\": 90000, \"travel\": 50000}}, {\"office_id\": \"vienna\", \"code\": \"vie\", \"name\": \"Vienna\", \"region\": \"Central\", \"manager_id\": \"m_anna\", \"manager_name\": \"Anna\", \"worker_id\": \"w_lena\", \"worker_name\": \"Lena\", \"cost_center\": \"CC-VIE-01\", \"budgets\": {\"people\": 540000, \"cloud\": 90000, \"gpu\": 60000, \"office\": 70000, \"travel\": 40000}}, {\"office_id\": \"amsterdam\", \"code\": \"ams\", \"name\": \"Amsterdam\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_jules\", \"worker_name\": \"Jules\", \"cost_center\": \"CC-AMS-01\", \"budgets\": {\"people\": 610000, \"cloud\": 150000, \"gpu\": 90000, \"office\": 80000, \"travel\": 55000}}, {\"office_id\": \"paris\", \"code\": \"par\", \"name\": \"Paris\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_jules\", \"worker_name\": \"Jules\", \"cost_center\": \"CC-PAR-01\", \"budgets\": {\"people\": 700000, \"cloud\": 120000, \"gpu\": 140000, \"office\": 110000, \"travel\": 70000}}, {\"office_id\": \"london\", \"code\": \"lon\", \"name\": \"London\", \"region\": \"West\", \"manager_id\": \"m_ben\", \"manager_name\": \"Ben\", \"worker_id\": \"w_mia\", \"worker_name\": \"Mia\", \"cost_center\": \"CC-LON-01\", \"budgets\": {\"people\": 880000, \"cloud\": 200000, \"gpu\": 160000, \"office\": 130000, \"travel\": 90000}}];\n// Stage 2: validate what the vision model read. Pasted into n8n Code nodes without the module.exports line.\n\nconst DOCUMENT_TYPES = { cost: 'PO', deal: 'DEAL', credit: 'CN' };\nconst DOCUMENT_CATEGORIES = ['people', 'cloud', 'gpu', 'office', 'travel'];\n\n// Formatted amounts: the later of \",\" and \".\" is the decimal point; a lone separator followed by exactly\n// three digits is a thousands separator (EUR never has three decimals); repeated separators are thousands.\nfunction toNumber(value) {\n  if (typeof value === 'number') return value;\n  const s = String(value ?? '').replace(/[^\\d.,-]/g, '');\n  if (!/\\d/.test(s)) return NaN;\n  const commas = (s.match(/,/g) || []).length;\n  const dots = (s.match(/\\./g) || []).length;\n  if (commas && dots) {\n    return Number(s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\\./g, '').replace(',', '.') : s.replace(/,/g, ''));\n  }\n  if (!commas && !dots) return Number(s);\n  const separator = commas ? ',' : '.';\n  const digitsAfter = s.length - s.lastIndexOf(separator) - 1;\n  const isThousands = commas + dots > 1 || digitsAfter === 3;\n  return Number(isThousands ? s.split(separator).join('') : s.replace(separator, '.'));\n}\n\nfunction isCalendarDate(iso) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(iso)) return false;\n  const [y, m, d] = iso.split('-').map(Number);\n  const date = new Date(Date.UTC(y, m - 1, d));\n  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;\n}\n\nfunction validateDocument(obj, expectedCostCenter) {\n  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('expected a JSON object');\n  const docType = obj.doc_type;\n  if (!Object.hasOwn(DOCUMENT_TYPES, docType)) throw new Error(`bad doc_type ${docType}`);\n  const docKey = String(obj.doc_key ?? '').trim();\n  if (!/^(PO|DEAL|CN)-\\d{4}$/.test(docKey) || !docKey.startsWith(DOCUMENT_TYPES[docType] + '-')) {\n    throw new Error(`bad doc_key ${obj.doc_key} for ${docType}`);\n  }\n  const version = Number(obj.version);\n  if (!Number.isInteger(version) || version < 1) throw new Error(`bad version ${obj.version}`);\n  const date = String(obj.date ?? '');\n  if (!isCalendarDate(date)) throw new Error(`bad date ${obj.date}`);\n  const rawCategory = obj.category === null || obj.category === undefined ? 'none' : String(obj.category);\n  const category = docType === 'deal'\n    ? (rawCategory === 'none' || rawCategory === '' ? null : undefined)\n    : (DOCUMENT_CATEGORIES.includes(rawCategory) ? rawCategory : undefined);\n  if (category === undefined) throw new Error(`bad category ${obj.category} for ${docType}`);\n  const amount = toNumber(obj.amount);\n  if (!Number.isFinite(amount)) throw new Error(`amount not numeric: ${obj.amount}`);\n  if (amount <= 0) throw new Error(`amount must be positive: ${obj.amount}`);\n  const counterparty = String(obj.counterparty ?? '').trim();\n  if (!counterparty) throw new Error('missing counterparty');\n  const description = String(obj.description_en ?? '').trim();\n  if (!description) throw new Error('missing description_en');\n  const costCenter = String(obj.cost_center ?? '').trim().toUpperCase();\n  if (costCenter !== String(expectedCostCenter).toUpperCase()) {\n    throw new Error(`cost center mismatch: read ${obj.cost_center}, expected ${expectedCostCenter}`);\n  }\n  return {\n    doc_type: docType, doc_key: docKey, version, cost_center: costCenter, date, counterparty, category, amount,\n    description_en: description.slice(0, 160),\n  };\n}\n\n// Glue for \"Validate the fields\" in 02 Process; validate.js and OFFICES are pasted above it. A throw goes to the\n// error output. The document must carry its own office's cost center.\nconst office = OFFICES.find((o) => o.office_id === $('Config').first().json.office_id);\nif (!office) throw new Error(`unknown office ${$('Config').first().json.office_id}`);\nlet reply;\ntry {\n  reply = JSON.parse($json.choices[0].message.content);\n} catch {\n  throw new Error('vision reply is not bare JSON');\n}\nreturn [{ json: { llm_fields: JSON.stringify(validateDocument(reply, office.cost_center)) } }];\n"
       },
       "onError": "continueErrorOutput"
     },
@@ -303,20 +290,20 @@
         "dataTableId": {
           "__rl": true,
           "mode": "name",
-          "value": "invoices"
+          "value": "documents"
         },
         "matchType": "allConditions",
         "filters": {
           "conditions": [
             {
-              "keyName": "invoice_id",
+              "keyName": "document_id",
               "condition": "eq",
-              "keyValue": "={{ $('Config').first().json.invoice_id }}"
+              "keyValue": "={{ $('Config').first().json.document_id }}"
             },
             {
-              "keyName": "customer_id",
+              "keyName": "office_id",
               "condition": "eq",
-              "keyValue": "={{ $('Config').first().json.customer_id }}"
+              "keyValue": "={{ $('Config').first().json.office_id }}"
             },
             {
               "keyName": "manager_id",
@@ -385,16 +372,17 @@
           "__rl": true,
           "value": "",
           "mode": "list",
-          "cachedResultName": "03 Rebuild point"
+          "cachedResultName": "03 Rebuild office point"
         },
+        "mode": "once",
         "options": {
           "waitForSubWorkflow": true
         }
       }
     },
     {
-      "id": "f92d546a-9467-5254-b7f3-f1889f35ac1b",
-      "name": "Write the narrative if ready",
+      "id": "c6e7a7ed-77fa-5394-bd6e-bdb38ad341f3",
+      "name": "Write the summary if ready",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
@@ -406,8 +394,9 @@
           "__rl": true,
           "value": "",
           "mode": "list",
-          "cachedResultName": "02b Write the narrative"
+          "cachedResultName": "02b Write the summary"
         },
+        "mode": "once",
         "options": {
           "waitForSubWorkflow": true
         }
@@ -428,20 +417,20 @@
         "dataTableId": {
           "__rl": true,
           "mode": "name",
-          "value": "invoices"
+          "value": "documents"
         },
         "matchType": "allConditions",
         "filters": {
           "conditions": [
             {
-              "keyName": "invoice_id",
+              "keyName": "document_id",
               "condition": "eq",
-              "keyValue": "={{ $('Config').first().json.invoice_id }}"
+              "keyValue": "={{ $('Config').first().json.document_id }}"
             },
             {
-              "keyName": "customer_id",
+              "keyName": "office_id",
               "condition": "eq",
-              "keyValue": "={{ $('Config').first().json.customer_id }}"
+              "keyValue": "={{ $('Config').first().json.office_id }}"
             },
             {
               "keyName": "manager_id",
@@ -495,7 +484,7 @@
         -240
       ],
       "parameters": {
-        "content": "Stages left to right: received, coarse (regex, wrong on German numbers on purpose), sharp (vision), narrative. Each stage ends in 03 Rebuild point.",
+        "content": "Stages left to right: received, rough (regex, wrong on German amounts on purpose), sharp (vision), summary. Each stage ends in 03 Rebuild office point.",
         "width": 460,
         "height": 140
       }
@@ -510,7 +499,7 @@
         380
       ],
       "parameters": {
-        "content": "Errors land in stage -1 and still rebuild. The card stays half-blurry and the demo continues.",
+        "content": "Errors land in stage -1 and still rebuild. The office stays partly blurred and the demo continues.",
         "width": 380,
         "height": 140
       }
@@ -543,14 +532,14 @@
       "main": [
         [
           {
-            "node": "Download the PDF for processing",
+            "node": "Read the PDF from the row",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Download the PDF for processing": {
+    "Read the PDF from the row": {
       "main": [
         [
           {
@@ -619,14 +608,14 @@
       "main": [
         [
           {
-            "node": "Show the coarse view",
+            "node": "Show the rough view",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Show the coarse view": {
+    "Show the rough view": {
       "main": [
         [
           {
@@ -688,7 +677,7 @@
       "main": [
         [
           {
-            "node": "Write the narrative if ready",
+            "node": "Write the summary if ready",
             "type": "main",
             "index": 0
           }
@@ -706,18 +695,6 @@
         ]
       ]
     }
-  },
-  "pinData": {
-    "When Executed by Another Workflow": [
-      {
-        "json": {
-          "invoice_id": "inv_seed_a",
-          "customer_id": "acme",
-          "manager_id": "m_anna",
-          "filename": "acme-001.pdf"
-        }
-      }
-    ]
   },
   "settings": {
     "executionOrder": "v1"

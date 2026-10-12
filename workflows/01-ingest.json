@@ -2,8 +2,8 @@
   "name": "01 Ingest",
   "nodes": [
     {
-      "id": "f5beb66c-173d-5dde-89e7-91d2432fda0b",
-      "name": "Pick an invoice",
+      "id": "4c91c20f-f132-574c-bc6b-bc93d4c25976",
+      "name": "Pick a document",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.2,
       "position": [
@@ -11,78 +11,27 @@
         0
       ],
       "parameters": {
-        "formTitle": "Send an invoice",
-        "formDescription": "Synthetic data only. Pick a sample invoice and the worker who received it.",
+        "formTitle": "Send a document to Q8nten",
+        "formDescription": "Synthetic documents of a fictional company. Pick one; the controller who files it is known.",
         "formFields": {
           "values": [
             {
-              "fieldLabel": "Invoice",
+              "fieldLabel": "Document",
               "fieldType": "dropdown",
               "requiredField": true,
               "fieldOptions": {
                 "values": [
                   {
-                    "option": "acme-001.pdf"
+                    "option": "ber-po-1042-v1.pdf"
                   },
                   {
-                    "option": "acme-002.pdf"
+                    "option": "ber-po-1042-v2.pdf"
                   },
                   {
-                    "option": "acme-003.pdf"
+                    "option": "muc-po-2041-v1.pdf"
                   },
                   {
-                    "option": "beta-001.pdf"
-                  },
-                  {
-                    "option": "beta-002.pdf"
-                  },
-                  {
-                    "option": "beta-003.pdf"
-                  },
-                  {
-                    "option": "beta-004.pdf"
-                  },
-                  {
-                    "option": "gamma-001.pdf"
-                  },
-                  {
-                    "option": "gamma-002.pdf"
-                  },
-                  {
-                    "option": "delta-001.pdf"
-                  },
-                  {
-                    "option": "delta-002.pdf"
-                  },
-                  {
-                    "option": "eps-001.pdf"
-                  },
-                  {
-                    "option": "eps-002.pdf"
-                  },
-                  {
-                    "option": "zeta-001.pdf"
-                  }
-                ]
-              }
-            },
-            {
-              "fieldLabel": "Worker",
-              "fieldType": "dropdown",
-              "requiredField": true,
-              "fieldOptions": {
-                "values": [
-                  {
-                    "option": "Tom"
-                  },
-                  {
-                    "option": "Lena"
-                  },
-                  {
-                    "option": "Jules"
-                  },
-                  {
-                    "option": "Mia"
+                    "option": "ber-po-1042-v1-copy.pdf"
                   }
                 ]
               }
@@ -91,11 +40,11 @@
         },
         "options": {}
       },
-      "webhookId": "eb0fd54b-cd84-5ea0-aa29-e002cb1977ef"
+      "webhookId": "441b1bba-2b68-5da0-8a15-e82d403af094"
     },
     {
-      "id": "d03ffb82-4421-50c2-8753-ca011f7e7af0",
-      "name": "Config",
+      "id": "10db87fb-1079-5a3e-a7f1-74c488958aa6",
+      "name": "Name the file",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
@@ -106,129 +55,38 @@
         "assignments": {
           "assignments": [
             {
-              "id": "49b6f4f5-6082-5aee-a383-e2b888f08aea",
-              "name": "SAMPLES_BASE_URL",
-              "value": "https://raw.githubusercontent.com/havenousername/n8n-invoice-memory/main/samples",
-              "type": "string"
-            },
-            {
-              "id": "25866f16-5a83-5b98-8973-d85b547da7ff",
-              "name": "SAMPLES",
-              "value": "[\"acme-001.pdf\", \"acme-002.pdf\", \"acme-003.pdf\", \"beta-001.pdf\", \"beta-002.pdf\", \"beta-003.pdf\", \"beta-004.pdf\", \"gamma-001.pdf\", \"gamma-002.pdf\", \"delta-001.pdf\", \"delta-002.pdf\", \"eps-001.pdf\", \"eps-002.pdf\", \"zeta-001.pdf\"]",
-              "type": "string"
-            },
-            {
-              "id": "655f9710-d79a-572a-af25-6695d829780a",
-              "name": "CUSTOMER_NAMES",
-              "value": "{\"acme\": \"Acme GmbH\", \"beta\": \"Beta Logistics AG\", \"gamma\": \"Gamma Labs UG\", \"delta\": \"Delta Retail SE\", \"eps\": \"Epsilon Media GmbH\", \"zeta\": \"Zeta Energy KG\"}",
-              "type": "string"
-            },
-            {
-              "id": "94c8cdda-b82c-5038-a3c9-cf50ca3915dc",
-              "name": "WORKERS",
-              "value": "{\"w_tom\": {\"manager_id\": \"m_anna\", \"name\": \"Tom\"}, \"w_lena\": {\"manager_id\": \"m_anna\", \"name\": \"Lena\"}, \"w_jules\": {\"manager_id\": \"m_ben\", \"name\": \"Jules\"}, \"w_mia\": {\"manager_id\": \"m_ben\", \"name\": \"Mia\"}}",
+              "id": "bdcbf2c5-bfd5-56e6-85e8-110e01e7048f",
+              "name": "file",
+              "value": "={{ $json.Document }}",
               "type": "string"
             }
           ]
         },
-        "includeOtherFields": true,
+        "includeOtherFields": false,
         "options": {}
       }
     },
     {
-      "id": "744accce-6263-5dc7-8af5-bc3a57e6dc28",
-      "name": "Validate the submission",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "4c994ea0-7cd3-5251-ae1c-10272e37b67c",
+      "name": "Record the document",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
       "position": [
         440,
         0
       ],
       "parameters": {
-        "jsCode": "// Point ids and upload identity. Pasted into n8n Code nodes without the module.exports line.\n\nfunction uuidFromHex(hex) {\n  if (typeof hex !== 'string' || !/^[0-9a-f]{32,}$/i.test(hex)) {\n    throw new Error(`expected a sha-256 hex digest, got ${hex}`);\n  }\n  const h = hex.toLowerCase();\n  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;\n}\n\nfunction resolveUpload(sampleFile, workerId, workers) {\n  const slug = String(sampleFile).replace(/\\.pdf$/i, '').split('-')[0].toLowerCase();\n  if (!slug) throw new Error(`no customer slug in ${sampleFile}`);\n  if (!Object.hasOwn(workers, workerId)) throw new Error(`unknown worker ${workerId}`);\n  return { customer_id: slug, worker_id: workerId, manager_id: workers[workerId].manager_id };\n}\n\n// Glue for \"Validate the submission\" in 01 Ingest; ids.js is pasted above it.\n// Form dropdowns are not a trust boundary, since anyone can post any value: the sample must be on the\n// manifest allowlist and the worker must be known before anything is downloaded.\nconst cfg = $('Config').first().json;\nconst samples = JSON.parse(cfg.SAMPLES);\nconst workers = JSON.parse(cfg.WORKERS);\nconst names = JSON.parse(cfg.CUSTOMER_NAMES);\nif (!samples.includes(cfg.Invoice)) throw new Error(`unknown sample ${cfg.Invoice}`);\nconst workerId = Object.keys(workers).find((id) => workers[id].name === cfg.Worker);\nif (!workerId) throw new Error(`unknown worker ${cfg.Worker}`);\nconst resolved = resolveUpload(cfg.Invoice, workerId, workers);\nreturn [{ json: {\n  ...resolved,\n  customer_name: Object.hasOwn(names, resolved.customer_id) ? names[resolved.customer_id] : resolved.customer_id,\n  invoice_id: `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,\n  filename: cfg.Invoice,\n  sample_url: `${cfg.SAMPLES_BASE_URL}/${cfg.Invoice}`,\n  received_at: new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z'),\n} }];\n"
-      }
-    },
-    {
-      "id": "ff761e06-7b4a-574e-8fc5-548a75c180ac",
-      "name": "Download the chosen sample",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        660,
-        0
-      ],
-      "parameters": {
-        "method": "GET",
-        "url": "={{ $('Validate the submission').first().json.sample_url }}",
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "01b Record a document"
+        },
+        "mode": "once",
         "options": {
-          "response": {
-            "response": {
-              "responseFormat": "file",
-              "outputPropertyName": "data"
-            }
-          }
+          "waitForSubWorkflow": true
         }
       }
-    },
-    {
-      "id": "75e38ffe-717a-5c61-8b9b-ab8b1fc81e5c",
-      "name": "Hash the PDF",
-      "type": "n8n-nodes-base.crypto",
-      "typeVersion": 2,
-      "position": [
-        880,
-        0
-      ],
-      "parameters": {
-        "action": "hash",
-        "type": "SHA256",
-        "binaryData": true,
-        "binaryPropertyName": "data",
-        "dataPropertyName": "pdf_hash",
-        "encoding": "hex"
-      }
-    },
-    {
-      "id": "5f4a99f8-3182-5e09-92d5-ece2e6d4a95a",
-      "name": "Seen this hash before?",
-      "type": "n8n-nodes-base.dataTable",
-      "typeVersion": 1.1,
-      "position": [
-        1100,
-        0
-      ],
-      "parameters": {
-        "resource": "row",
-        "operation": "get",
-        "dataTableId": {
-          "__rl": true,
-          "mode": "name",
-          "value": "invoices"
-        },
-        "matchType": "allConditions",
-        "filters": {
-          "conditions": [
-            {
-              "keyName": "pdf_hash",
-              "condition": "eq",
-              "keyValue": "={{ $('Hash the PDF').first().json.pdf_hash }}"
-            },
-            {
-              "keyName": "customer_id",
-              "condition": "eq",
-              "keyValue": "={{ $('Validate the submission').first().json.customer_id }}"
-            },
-            {
-              "keyName": "manager_id",
-              "condition": "eq",
-              "keyValue": "={{ $('Validate the submission').first().json.manager_id }}"
-            }
-          ]
-        },
-        "returnAll": true
-      },
-      "alwaysOutputData": true,
-      "executeOnce": true
     },
     {
       "id": "2bd3cd5f-bbb8-55ae-acbc-364e4e92bc0e",
@@ -236,7 +94,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1320,
+        660,
         0
       ],
       "parameters": {
@@ -250,7 +108,7 @@
           "conditions": [
             {
               "id": "6c45ba44-9179-5873-b069-db8af52d29ea",
-              "leftValue": "={{ !!$json.invoice_id }}",
+              "leftValue": "={{ $json.status === 'duplicate' }}",
               "rightValue": "",
               "operator": {
                 "type": "boolean",
@@ -270,338 +128,16 @@
       "type": "n8n-nodes-base.form",
       "typeVersion": 1,
       "position": [
-        1540,
+        880,
         -200
       ],
       "parameters": {
         "operation": "completion",
         "completionTitle": "Duplicate",
-        "completionMessage": "=That's {{ $('Seen this hash before?').first().json.filename }} again (hash match). Nothing new was ingested.",
+        "completionMessage": "=That's {{ $('Record the document').first().json.filename }} again (same bytes). Recorded as a duplicate, never summed.",
         "options": {}
       },
       "webhookId": "e13a0ef9-5b5e-59ed-b286-bf1873ebe15f"
-    },
-    {
-      "id": "6f121774-1231-5638-8f69-b000579e3816",
-      "name": "Load the existing customer",
-      "type": "n8n-nodes-base.dataTable",
-      "typeVersion": 1.1,
-      "position": [
-        1540,
-        200
-      ],
-      "parameters": {
-        "resource": "row",
-        "operation": "get",
-        "dataTableId": {
-          "__rl": true,
-          "mode": "name",
-          "value": "customers"
-        },
-        "matchType": "allConditions",
-        "filters": {
-          "conditions": [
-            {
-              "keyName": "customer_id",
-              "condition": "eq",
-              "keyValue": "={{ $('Validate the submission').first().json.customer_id }}"
-            },
-            {
-              "keyName": "manager_id",
-              "condition": "eq",
-              "keyValue": "={{ $('Validate the submission').first().json.manager_id }}"
-            }
-          ]
-        },
-        "returnAll": true
-      },
-      "alwaysOutputData": true,
-      "executeOnce": true
-    },
-    {
-      "id": "4397107d-b3e8-5435-9c2f-bde34fd16951",
-      "name": "Decide the rows",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1760,
-        200
-      ],
-      "parameters": {
-        "jsCode": "// Glue for \"Decide the rows\" in 01 Ingest. Its input is the existing customer row, or an empty item.\n// The first worker keeps the customer and its name is never overwritten; the invoice records who submitted it.\nconst v = $('Validate the submission').first().json;\nconst existing = $json.customer_id ? $json : {};\nreturn [{ json: {\n  customer: {\n    customer_id: v.customer_id,\n    manager_id: v.manager_id,\n    worker_id: existing.worker_id || v.worker_id,\n    name: existing.name || v.customer_name,\n  },\n  invoice: {\n    invoice_id: v.invoice_id,\n    customer_id: v.customer_id,\n    worker_id: v.worker_id,\n    manager_id: v.manager_id,\n    pdf_hash: $('Hash the PDF').first().json.pdf_hash,\n    filename: v.filename,\n    text: '',\n    stage: 0,\n    regex_fields: '{}',\n    llm_fields: '{}',\n    error: '',\n    received_at: v.received_at,\n  },\n} }];\n"
-      }
-    },
-    {
-      "id": "f5d4ab9e-0b9f-55c1-8654-dc47dec2049e",
-      "name": "Upsert the customer row",
-      "type": "n8n-nodes-base.dataTable",
-      "typeVersion": 1.1,
-      "position": [
-        1980,
-        200
-      ],
-      "parameters": {
-        "resource": "row",
-        "operation": "upsert",
-        "dataTableId": {
-          "__rl": true,
-          "mode": "name",
-          "value": "customers"
-        },
-        "matchType": "allConditions",
-        "filters": {
-          "conditions": [
-            {
-              "keyName": "customer_id",
-              "condition": "eq",
-              "keyValue": "={{ $('Decide the rows').first().json.customer.customer_id }}"
-            },
-            {
-              "keyName": "manager_id",
-              "condition": "eq",
-              "keyValue": "={{ $('Decide the rows').first().json.customer.manager_id }}"
-            }
-          ]
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "customer_id": "={{ $('Decide the rows').first().json.customer.customer_id }}",
-            "manager_id": "={{ $('Decide the rows').first().json.customer.manager_id }}",
-            "worker_id": "={{ $('Decide the rows').first().json.customer.worker_id }}",
-            "name": "={{ $('Decide the rows').first().json.customer.name }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "worker_id",
-              "displayName": "worker_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "name",
-              "displayName": "name",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "3c6552d8-43fb-5ca3-9217-1e69424290ff",
-      "name": "Append the invoice row",
-      "type": "n8n-nodes-base.dataTable",
-      "typeVersion": 1.1,
-      "position": [
-        2200,
-        200
-      ],
-      "parameters": {
-        "resource": "row",
-        "operation": "insert",
-        "dataTableId": {
-          "__rl": true,
-          "mode": "name",
-          "value": "invoices"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "invoice_id": "={{ $('Decide the rows').first().json.invoice.invoice_id }}",
-            "customer_id": "={{ $('Decide the rows').first().json.invoice.customer_id }}",
-            "worker_id": "={{ $('Decide the rows').first().json.invoice.worker_id }}",
-            "manager_id": "={{ $('Decide the rows').first().json.invoice.manager_id }}",
-            "pdf_hash": "={{ $('Decide the rows').first().json.invoice.pdf_hash }}",
-            "filename": "={{ $('Decide the rows').first().json.invoice.filename }}",
-            "text": "={{ $('Decide the rows').first().json.invoice.text }}",
-            "stage": "={{ $('Decide the rows').first().json.invoice.stage }}",
-            "regex_fields": "={{ $('Decide the rows').first().json.invoice.regex_fields }}",
-            "llm_fields": "={{ $('Decide the rows').first().json.invoice.llm_fields }}",
-            "error": "={{ $('Decide the rows').first().json.invoice.error }}",
-            "received_at": "={{ $('Decide the rows').first().json.invoice.received_at }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "invoice_id",
-              "displayName": "invoice_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "worker_id",
-              "displayName": "worker_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "pdf_hash",
-              "displayName": "pdf_hash",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "filename",
-              "displayName": "filename",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "text",
-              "displayName": "text",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "stage",
-              "displayName": "stage",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "number",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "regex_fields",
-              "displayName": "regex_fields",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "llm_fields",
-              "displayName": "llm_fields",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "error",
-              "displayName": "error",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "received_at",
-              "displayName": "received_at",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "dateTime",
-              "readOnly": false,
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "03bb64d2-0d4a-56c3-b6f6-e8680b905178",
-      "name": "Process in the background",
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1.2,
-      "position": [
-        2420,
-        200
-      ],
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "",
-          "mode": "list",
-          "cachedResultName": "02 Process"
-        },
-        "options": {
-          "waitForSubWorkflow": false
-        }
-      }
     },
     {
       "id": "ac7a41e4-616c-5cdf-813f-6ffc7a92d98d",
@@ -609,13 +145,13 @@
       "type": "n8n-nodes-base.form",
       "typeVersion": 1,
       "position": [
-        2640,
+        880,
         200
       ],
       "parameters": {
         "operation": "completion",
         "completionTitle": "Received",
-        "completionMessage": "Watch the dashboard. Rough in two seconds, sharp in thirty.",
+        "completionMessage": "Watch the dashboard: rough in two seconds, sharp in thirty.",
         "options": {}
       },
       "webhookId": "399689b9-1bf3-55e4-8c4e-fe0893e9dfd7"
@@ -630,84 +166,36 @@
         -240
       ],
       "parameters": {
-        "content": "No file field on purpose: samples download from the public repo, and both dropdowns are checked against the manifest and the worker list. To accept uploads, add a File field and drop the download.",
-        "width": 380,
-        "height": 140
-      }
-    },
-    {
-      "id": "355b74ef-7e92-51ec-85f2-d21d732c6892",
-      "name": "Storage",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        660,
-        380
-      ],
-      "parameters": {
-        "content": "Keeping the PDF? Add your storage node after the download. The PDF outlives a GDPR removal of the searchable record.",
+        "content": "No file field on purpose: the pool is the booth documents, checked again by 01b. To accept uploads, add a File field and pass filename, pdf_base64, office_id, and worker_id.",
         "width": 380,
         "height": 140
       }
     }
   ],
   "connections": {
-    "Pick an invoice": {
+    "Pick a document": {
       "main": [
         [
           {
-            "node": "Config",
+            "node": "Name the file",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Config": {
+    "Name the file": {
       "main": [
         [
           {
-            "node": "Validate the submission",
+            "node": "Record the document",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Validate the submission": {
-      "main": [
-        [
-          {
-            "node": "Download the chosen sample",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Download the chosen sample": {
-      "main": [
-        [
-          {
-            "node": "Hash the PDF",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Hash the PDF": {
-      "main": [
-        [
-          {
-            "node": "Seen this hash before?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Seen this hash before?": {
+    "Record the document": {
       "main": [
         [
           {
@@ -727,61 +215,6 @@
             "index": 0
           }
         ],
-        [
-          {
-            "node": "Load the existing customer",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Load the existing customer": {
-      "main": [
-        [
-          {
-            "node": "Decide the rows",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Decide the rows": {
-      "main": [
-        [
-          {
-            "node": "Upsert the customer row",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upsert the customer row": {
-      "main": [
-        [
-          {
-            "node": "Append the invoice row",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Append the invoice row": {
-      "main": [
-        [
-          {
-            "node": "Process in the background",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Process in the background": {
-      "main": [
         [
           {
             "node": "Say it was received",

@@ -1,12 +1,17 @@
-// Glue for the "Compute the view" Code node in 03 Rebuild point.
-// scripts/build_workflows.py pastes ids.js and view.js above this; n8n runs the whole as a function body.
+// Glue for the "Compute the view" Code node in 03 Rebuild office point.
+// build_workflows.py pastes OFFICES, ids.js, and office-view.js above this; n8n runs the whole as a function body.
+// Name, region, and budgets come from OFFICES; the office row only adds the saved summary.
 const cfg = $('Config').first().json;
-const customers = $('Load the customer row').all().map((i) => i.json).filter((r) => r.customer_id);
-const invoiceRows = $('Load all invoice rows').all().map((i) => i.json).filter((r) => r.invoice_id);
-if (!customers.length) throw new Error(`no customer row for ${cfg.manager_id}/${cfg.customer_id}`);
-if (customers.length > 1) throw new Error(`${customers.length} customer rows for ${cfg.manager_id}/${cfg.customer_id}`);
+const office = OFFICES.find((o) => o.office_id === cfg.office_id);
+if (!office || office.manager_id !== cfg.manager_id) throw new Error(`unknown office ${cfg.manager_id}/${cfg.office_id}`);
+const officeRows = $('Load the office row').all().map((i) => i.json).filter((r) => r.office_id);
+if (officeRows.length > 1) throw new Error(`${officeRows.length} office rows for ${cfg.manager_id}/${cfg.office_id}`);
+const saved = officeRows[0] || {};
+const rows = $('Load all document rows').all().map((i) => i.json).filter((r) => r.document_id);
 const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-const { payload, texts } = computeView(customers[0], invoiceRows, now);
+const { payload, texts } = computeOfficeView(
+  { ...office, narrative: saved.narrative, narrative_at: saved.narrative_at, narrative_revision: saved.narrative_revision },
+  rows, office.budgets, now);
 const id = uuidFromHex($('Hash the point id').first().json.idhash);
 return [{ json: { body: {
   shard_key: cfg.manager_id,
