@@ -39,7 +39,8 @@ Applies to `dashboard/` (Manager view and Console). Derived with ui-ux-pro-max (
 
 ## Layout
 
-- **Manager view** (`/`): a 12-column grid at 1920 px with 32 px gutters. Top: manager pills (Anna, Ben) and the live indicator. Then the latest-document band (hero figure, stages 01 to 04 with timings, first-read cost against later answers). Then four stat tiles. Then Ask the memory (query, threshold, three lens columns, fused row) beside the tape. Then office cards grouped by controller.
+- **Manager view** (`/`), chosen layout "office map with a spotlight": header (brand, manager pills, live indicator), five stat tiles, then a 2 × 2 map beside a 600 px column. The map's first tile is the **spotlight** (a failed read, else the document being read, else a fresh duplicate or amendment, else the latest document: the paper, the hero amount, stages 01 to 04 with timings, the read-once cost); the other three tiles are the manager's offices, one Qdrant point each. The column holds Ask the memory (query, threshold, Keyword, Line, Meaning, fused) above the tape.
+- **Kiosk stage:** both views render on a fixed 1920 × 1080 canvas scaled to the screen, so a projector, a TV, and a laptop show the same picture without scrolling; below 1000 px wide the layout stacks instead.
 - **Console** (`/console`): controls on the left (send from the pool, start and stop the day, reset), the latest-document band on top, the n8n pipeline canvas filling the rest.
 - Cards: 8 px radius (16 px for the hero band), 24 px padding, 1 px `--border`; hover shifts the border color only (no scale, no layout shift).
 - Z-index scale: base 0, sticky header 10, toasts 30, modals 50.
