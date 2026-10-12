@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { berlin, doc } from './fixtures';
-import { latestAcross, matchedLine, toLensResults, toOfficeCard } from './shape';
+import { latestAcross, matchedDocument, matchedSentence, toLensResults, toOfficeCard } from './shape';
 
 describe('toOfficeCard', () => {
   it('rates every line: over plan, near plan from 85%, within plan otherwise', () => {
@@ -22,22 +22,33 @@ describe('toOfficeCard', () => {
   });
 });
 
-describe('matchedLine', () => {
-  it('picks the document line sharing the most words with the query', () => {
-    const payload = berlin({ documents: [
-      doc({ document_id: 'a', doc_key: 'PO-2041', counterparty: 'Hetzner Online GmbH', description_en: 'Dedicated servers for staging' }),
-      doc({ document_id: 'b', doc_key: 'PO-1042', description_en: 'GPU servers for the inference launch' }),
-    ] });
-    expect(matchedLine(payload, 'gpu servers launch')).toBe('PO-1042 · Rechenwerk Systems GmbH · GPU servers for the inference launch');
-    expect(matchedLine(payload, 'PO-2041')).toMatch(/^PO-2041/);
+describe('matchedDocument', () => {
+  const payload = berlin({ documents: [
+    doc({ document_id: 'a', doc_key: 'PO-2041', counterparty: 'Hetzner Online GmbH', description_en: 'Dedicated servers for staging' }),
+    doc({ document_id: 'b', doc_key: 'PO-1042', version: 2, description_en: 'GPU servers (11x) for the inference launch' }),
+  ] });
+  it('picks the current document sharing the most words, and says which words', () => {
+    expect(matchedDocument(payload, 'GPU servers for the launch')).toEqual({
+      text: 'PO-1042 v2 · Rechenwerk Systems GmbH · GPU servers (11x) for the inference launch',
+      words: ['gpu', 'servers', 'launch'],
+    });
+    expect(matchedDocument(payload, 'PO-2041')?.text).toMatch(/^PO-2041 v1 · Hetzner/);
   });
-  it('falls back to a summary sentence, then to nothing', () => {
-    expect(matchedLine(berlin({ documents: [] }), 'cloud budget')).toBe('Cloud is close to its budget.');
-    expect(matchedLine(berlin({ documents: [] }), 'zzz')).toBeNull();
+  it('filler words never count as a match', () => {
+    expect(matchedDocument(payload, 'for the')).toBeNull();
   });
-  it('skips superseded and duplicate documents', () => {
-    const payload = berlin({ summary_text: '', documents: [doc({ document_id: 'old', status: 'superseded', description_en: 'old order' })] });
-    expect(matchedLine(payload, 'old order')).toBeNull();
+  it('never answers from superseded or duplicate documents, or from nothing', () => {
+    const old = berlin({ documents: [doc({ document_id: 'old', status: 'superseded', description_en: 'old order' })] });
+    expect(matchedDocument(old, 'old order')).toBeNull();
+    expect(matchedDocument(payload, 'zzz')).toBeNull();
+  });
+});
+
+describe('matchedSentence', () => {
+  it('picks the summary sentence closest to the question, else the first sentence', () => {
+    expect(matchedSentence(berlin(), 'cloud budget')).toBe('Cloud is close to its budget.');
+    expect(matchedSentence(berlin(), 'zzz')).toBe('Berlin is over plan in GPU compute.');
+    expect(matchedSentence(berlin({ summary_text: '' }), 'x')).toBeNull();
   });
 });
 
@@ -47,7 +58,8 @@ describe('toLensResults', () => {
     const response = [{ points: [hit('berlin', 9.1)] }, { points: [hit('munich', 0.8)] }, { points: [] }, { points: [hit('berlin', 0.5), hit('munich', 0.33)] }];
     const lenses = toLensResults(response, 'gpu servers');
     expect(Object.keys(lenses)).toEqual(['keyword', 'line', 'meaning', 'fused']);
-    expect(lenses.keyword).toEqual([{ office_id: 'berlin', name: 'BERLIN', score: 9.1, matched: expect.stringContaining('GPU servers') }]);
+    expect(lenses.keyword).toEqual([{ office_id: 'berlin', name: 'BERLIN', score: 9.1,
+      document: { text: expect.stringContaining('GPU servers'), words: ['gpu', 'servers'] }, sentence: 'Berlin is over plan in GPU compute.' }]);
     expect(lenses.meaning).toEqual([]);
     expect(lenses.fused.map((h) => h.office_id)).toEqual(['berlin', 'munich']);
   });

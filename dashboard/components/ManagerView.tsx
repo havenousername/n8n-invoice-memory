@@ -9,18 +9,20 @@ import type { OfficeCard as Card } from '@/lib/shape';
 import { pickSpotlight, type SeenEvent } from '@/lib/spotlight';
 import { AskPanel, type Answer } from './AskPanel';
 import { Beams } from './Beams';
-import { OfficeCard } from './OfficeCard';
+import { OfficesPanel, type OfficeView } from './OfficesPanel';
+import { topHits, type LensKey } from './LensColumns';
 import { PasscodeGate } from './PasscodeGate';
 import { ShardSwap } from './ShardSwap';
 import { Stage } from './Stage';
 import { Spotlight, type Correction, type StageTimes } from './Spotlight';
-import { Tape } from './Tape';
-import { Tiles } from './Tiles';
 
 type Offices = { offices: Card[]; took_ms: number } | { locked: true };
 const ORDER = ['berlin', 'munich', 'vienna', 'amsterdam', 'paris', 'london'];
 const FLASH_MS = 4500;
-const RING_MS = 6000;
+const RING_MS = 9000;
+const LENS_FLIP_MS = 3500;
+const AUTO_POINT_MS = 7000;
+const AUTO_POINT = new Set<SeenEvent['kind']>(['corrected', 'superseded', 'duplicate']);
 const SWAP_MS = 5000;
 const PRIORITY: Record<SeenEvent['kind'], number> = { error: 7, duplicate: 6, superseded: 5, corrected: 4, summary: 3, received: 2, stage: 1 };
 
@@ -35,13 +37,15 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
   const [flashes, setFlashes] = useState<Record<string, SeenEvent>>({});
   const [times, setTimes] = useState<StageTimes>({});
   const [corrections, setCorrections] = useState<Record<string, Correction>>({});
-  const [served, setServed] = useState(0);
-  const [overOnly, setOverOnly] = useState(false);
   const [answer, setAnswer] = useState<(Answer & { manager: ManagerId; at: number }) | null>(null);
+  const [lens, setLens] = useState<LensKey>('summary');
+  const [askOpen, setAskOpen] = useState(true);
+  const [view, setView] = useState<OfficeView & { until?: number }>({ mode: 'chart' });
   const [now, setNow] = useState(0); // set by the poll and a 1 s tick; never read during render on the server
   const previous = useRef<Card[] | null>(null);
   const managerRef = useRef<ManagerId>(initialManager);
   const poller = useRef<ReturnType<typeof createPoller<Offices>> | null>(null);
+  const flip = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onData = useCallback((key: string, data: Offices) => {
     if ('locked' in data) { setLocked(true); return; }
@@ -62,11 +66,13 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
         for (const e of events) if (e.kind === 'corrected' && e.document_id) next[e.document_id] = { from: e.from ?? null, to: e.to ?? null };
         return next;
       });
+      // A notable change opens that office's point for a few seconds, unless someone pinned a point by clicking.
+      const notable = [...events].reverse().find((e) => AUTO_POINT.has(e.kind));
+      if (notable) setView((v) => (v.mode === 'point' && v.pinned ? v : { mode: 'point', office: notable.office_id, pinned: false, until: t + AUTO_POINT_MS }));
     }
     previous.current = data.offices;
     setCards([...data.offices].sort((a, b) => ORDER.indexOf(a.office_id) - ORDER.indexOf(b.office_id)));
     setTookMs(data.took_ms);
-    setServed((s) => s + data.offices.filter((c) => c.summary_stage === 3).length);
     setOffline(false);
     void key;
   }, []);
@@ -86,7 +92,7 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
     poller.current = p;
     p.start(managerRef.current);
     const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => { p.stop(); clearInterval(tick); };
+    return () => { p.stop(); clearInterval(tick); if (flip.current) clearTimeout(flip.current); };
   }, [onData]);
 
   function switchTo(next: ManagerId) {
@@ -95,7 +101,7 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
     managerRef.current = next;
     setManager(next);
     previous.current = null;
-    setCards(null); setFlashes({}); setAnswer(null); setOverOnly(false);
+    setCards(null); setFlashes({}); setAnswer(null); setView({ mode: 'chart' });
     poller.current?.setKey(next);
     window.history.replaceState(null, '', `?manager=${next}`);
   }
@@ -108,6 +114,10 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
 
   const onAnswer = useCallback((a: Answer | null) => {
     setAnswer(a ? { ...a, manager: managerRef.current, at: Date.now() } : null);
+    // Show what the summary answers, then flip once to what the PDF answers, so the aisle sees both.
+    setLens('summary');
+    if (flip.current) clearTimeout(flip.current);
+    if (a) flip.current = setTimeout(() => setLens('pdf'), LENS_FLIP_MS);
   }, []);
 
   if (locked) return <PasscodeGate onUnlocked={unlock} />;
@@ -116,15 +126,13 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
   const spot = pickSpotlight(shown, tape, now);
   const liveAnswer = answer && answer.manager === manager ? answer : null;
   const ringsOn = liveAnswer && now - liveAnswer.at < RING_MS;
-  const lensOf = (office: string) => {
-    if (!ringsOn) return undefined;
-    const hit = (['meaning', 'line', 'keyword'] as const).find((lens) => liveAnswer.lenses[lens][0]?.office_id === office);
-    return hit;
-  };
+  const lensOf = (office: string): LensKey | undefined =>
+    ringsOn && topHits(liveAnswer.lenses)[lens]?.office_id === office ? lens : undefined;
   const freshFlash = (office: string) => {
     const f = flashes[office];
     return f && now - f.seenAt < FLASH_MS ? f : undefined;
   };
+  const officeView: OfficeView = view.mode === 'point' && !view.pinned && view.until !== undefined && now > view.until ? { mode: 'chart' } : view;
   const slots = Array.from({ length: 3 }, (_, i) => shown[i] ?? null);
 
   return (
@@ -132,42 +140,27 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
     <Stage>
     <div className="shell">
       <header className="header">
-        <div className="brand">
-          <span className="brand-name">Q8nten</span>
-          <span className="brand-sub">Office memory · documents by <b className="n8n">n8n</b>, one point per office in <b className="qdrant">Qdrant</b></span>
-        </div>
+        <span className="brand-name">Q8nten</span>
+        <span className="brand-sub">documents by <b className="n8n">n8n</b> · memory in <b className="qdrant">Qdrant</b></span>
         <span className="header-spacer" />
         <ShardSwap manager={manager} swappedFrom={swap && now - swap.at < SWAP_MS ? swap.from : null} onSwitch={switchTo} />
         <span className={`live${offline ? ' offline' : ''}`} role="status">
           <span className="live-dot" aria-hidden="true" />
-          {offline ? 'offline, showing last known offices' : tookMs !== null ? <>live · <span className="num">{tookMs} ms</span></> : 'connecting…'}
+          {offline ? 'offline, last known offices' : tookMs !== null ? <>live · <span className="num">{tookMs} ms</span></> : 'connecting…'}
         </span>
       </header>
 
-      <Tiles cards={shown} overOnly={overOnly} onOverOnly={() => setOverOnly((v) => !v)} served={served} tookMs={tookMs} />
-
-      <main className="main">
-        <div className="map">
-          {cards ? <Spotlight spot={spot} times={times} corrections={corrections} tookMs={tookMs} /> : <div className="skeleton" aria-hidden="true" />}
-          {slots.map((card, i) => card
-            ? <OfficeCard key={`${manager}-${card.office_id}`} card={card} flash={freshFlash(card.office_id)}
-                dim={overOnly && card.over_count === 0} lens={lensOf(card.office_id)}
-                fused={!!ringsOn && liveAnswer.lenses.fused[0]?.office_id === card.office_id} />
-            : <div key={`${manager}-empty-${i}`} className="skeleton" aria-hidden="true" />)}
+      <main className={`split${askOpen ? '' : ' ask-closed'}`}>
+        <div className="left">
+          {cards ? <Spotlight spot={spot} times={times} corrections={corrections} /> : <div className="skeleton spot-skeleton" aria-hidden="true" />}
+          <OfficesPanel cards={slots} now={now} view={officeView} onView={setView} flashFor={freshFlash} lensFor={lensOf} />
         </div>
-        <div className="side">
-          <AskPanel manager={manager} answer={liveAnswer} onAnswer={onAnswer} />
-          <Tape events={tape} />
-        </div>
+        <AskPanel manager={manager} answer={liveAnswer} onAnswer={onAnswer} lens={lens} onLens={setLens}
+          open={askOpen} onToggle={() => setAskOpen((o) => !o)} />
       </main>
-
-      <footer className="footer">
-        <span className="honest">The documents are written live by AI workers playing the controllers. In real life they come from people and suppliers.</span>
-        <span>Each card is one Qdrant point: every document, version, and summary of an office in one place.</span>
-      </footer>
     </div>
     </Stage>
-    <Beams lenses={ringsOn ? liveAnswer.lenses : null} stamp={liveAnswer ? `${liveAnswer.at}` : null} />
+    {askOpen && <Beams lenses={ringsOn ? liveAnswer.lenses : null} lens={lens} stamp={liveAnswer ? `${liveAnswer.at}` : null} />}
     </>
   );
 }

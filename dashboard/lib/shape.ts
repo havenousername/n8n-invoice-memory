@@ -24,7 +24,8 @@ export type OfficePayload = {
 export type LineStatus = 'within' | 'near' | 'over';
 export type RatedLine = Line & { status: LineStatus; used: number };
 export type OfficeCard = Omit<OfficePayload, 'lines'> & { point_id: string; lines: RatedLine[]; over_count: number };
-export type LensHit = { office_id: string; name: string; score: number; matched: string | null };
+export type MatchedDocument = { text: string; words: string[] };
+export type LensHit = { office_id: string; name: string; score: number; document: MatchedDocument | null; sentence: string | null };
 export type LensResults = { keyword: LensHit[]; line: LensHit[]; meaning: LensHit[]; fused: LensHit[] };
 export type LatestDocument = Latest & { office_id: string; office_name: string; manager_id: string };
 
@@ -42,22 +43,33 @@ export function toOfficeCard(point: { id: string | number; payload: OfficePayloa
   return { ...rest, point_id: String(point.id), lines: rated, over_count: rated.filter((l) => l.status === 'over').length };
 }
 
-const words = (text: string) => new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1));
+// Filler words never decide a match: "for" is in every purchase order.
+const FILLER = new Set(['the', 'for', 'and', 'of', 'in', 'on', 'to', 'an', 'with', 'by', 'at', 'is', 'are', 'which', 'what', 'how',
+  'from', 'this', 'that', 'its', 'per', 'der', 'die', 'das', 'für', 'und', 'mit']);
+const tokens = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1 && !FILLER.has(w));
 
-/** The current document line (or summary sentence) sharing the most words with the query, for "why this office". */
-export function matchedLine(payload: Pick<OfficePayload, 'documents' | 'summary_text'>, query: string): string | null {
-  const asked = words(query);
-  const candidates = [
-    ...payload.documents.filter((d) => d.status === 'current').reverse()
-      .map((d) => [d.doc_key, d.counterparty, d.description_en].filter(Boolean).join(' · ')),
-    ...(payload.summary_text || '').split(/(?<=[.!?])\s+/).filter(Boolean),
-  ];
-  let best: string | null = null;
+/** The current document whose line shares the most words with the question, and those words (for highlighting). */
+export function matchedDocument(payload: Pick<OfficePayload, 'documents'>, query: string): MatchedDocument | null {
+  const asked = [...new Set(tokens(query))];
+  let best: MatchedDocument | null = null;
+  for (const d of payload.documents.filter((doc) => doc.status === 'current').reverse()) {
+    const text = [`${d.doc_key ?? '?'} v${d.version ?? '?'}`, d.counterparty, d.description_en].filter(Boolean).join(' · ');
+    const have = new Set(tokens(text));
+    const words = asked.filter((w) => have.has(w));
+    if (words.length > (best?.words.length ?? 0)) best = { text, words };
+  }
+  return best;
+}
+
+/** The summary sentence closest to the question; the first sentence when none shares a word. */
+export function matchedSentence(payload: Pick<OfficePayload, 'summary_text'>, query: string): string | null {
+  const sentences = (payload.summary_text || '').split(/(?<=[.!?])\s+/).filter(Boolean);
+  const asked = new Set(tokens(query));
+  let best = sentences[0] ?? null;
   let bestScore = 0;
-  for (const candidate of candidates) {
-    const have = words(candidate);
-    const score = [...asked].filter((w) => have.has(w)).length;
-    if (score > bestScore) { best = candidate; bestScore = score; }
+  for (const sentence of sentences) {
+    const score = tokens(sentence).filter((w) => asked.has(w)).length;
+    if (score > bestScore) { best = sentence; bestScore = score; }
   }
   return best;
 }
@@ -67,7 +79,8 @@ type Hit = { id: string | number; score: number; payload: Pick<OfficePayload, 'o
 export function toLensResults(batch: { points: Hit[] }[], query: string): LensResults {
   if (!Array.isArray(batch) || batch.length !== 4) throw new Error('expected four searches: keyword, line, meaning, fused');
   const hits = (points: Hit[]) => points.map((p) => ({
-    office_id: p.payload.office_id, name: p.payload.name, score: p.score, matched: matchedLine(p.payload, query),
+    office_id: p.payload.office_id, name: p.payload.name, score: p.score,
+    document: matchedDocument(p.payload, query), sentence: matchedSentence(p.payload, query),
   }));
   const [keyword, line, meaning, fused] = batch.map((r) => hits(r.points));
   return { keyword, line, meaning, fused };

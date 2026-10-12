@@ -1,48 +1,45 @@
-import { Combine } from 'lucide-react';
-import type { LensHit, LensResults } from '@/lib/shape';
+import { FileText, Sparkles } from 'lucide-react';
+import type { LensHit, LensResults, MatchedDocument } from '@/lib/shape';
 
 export const LENSES = [
-  { key: 'keyword', name: 'Keyword', vector: 'bm25', what: 'exact codes and names' },
-  { key: 'line', name: 'Line', vector: 'ColBERT', what: 'one specific line' },
-  { key: 'meaning', name: 'Meaning', vector: 'dense', what: 'the overall situation' },
+  { key: 'summary', name: 'From the summary', short: 'Summary', Icon: Sparkles, color: 'var(--lens-keyword)', hex: '#039be5',
+    how: 'hybrid search, three vectors fused' },
+  { key: 'pdf', name: 'From the PDF', short: 'PDF', Icon: FileText, color: 'var(--lens-line)', hex: '#7c66ff',
+    how: 'ColBERT, word by word' },
 ] as const;
+export type LensKey = (typeof LENSES)[number]['key'];
 
-const COLOR = { keyword: 'var(--lens-keyword)', line: 'var(--lens-line)', meaning: 'var(--lens-meaning)' };
+/** The top hit of each lens: summary from the fused ranking, PDF from the ColBERT search. */
+export function topHits(lenses: LensResults): Record<LensKey, LensHit | undefined> {
+  return { summary: lenses.fused[0], pdf: lenses.line[0] };
+}
 
-/** Three representations side by side, then the fused ranking Qdrant computed from all three. */
-export function LensColumns({ lenses, tookMs }: { lenses: LensResults; tookMs: number }) {
+/** One lens at a time, like a switch on a tour: the answer big, the runners-up as plain names. */
+export function LensAnswer({ lenses, lens }: { lenses: LensResults; lens: LensKey }) {
+  const hits = lens === 'summary' ? lenses.fused : lenses.line;
+  const meta = LENSES.find((l) => l.key === lens)!;
+  const [best, ...rest] = hits;
+  if (!best) return <p className="empty">No office matches.</p>;
   return (
-    <>
-      <div className="lenses">
-        {LENSES.map((lens) => (
-          <section key={lens.key} id={`lens-${lens.key}`} className="lens" style={{ ['--lens-color' as string]: COLOR[lens.key] }}>
-            <h3>{lens.name} <span>{lens.vector}</span></h3>
-            <p className="what">{lens.what}</p>
-            <Hits hits={lenses[lens.key]} />
-          </section>
-        ))}
-      </div>
-      <section className="fused" aria-label="Fused result">
-        <h3><Combine size={18} aria-hidden="true" /> Fused: one request, three lenses, ranked by RRF</h3>
-        {lenses.fused.length ? (
-          <ol>{lenses.fused.slice(0, 3).map((hit) => <li key={hit.office_id}><b>{hit.name}</b>{hit.matched && <span className="matched">{hit.matched}</span>}</li>)}</ol>
-        ) : <p className="empty">No office matches.</p>}
-      </section>
-      <p className="answer-meta"><span>answered in <b className="num">{tookMs} ms</b></span><span><b>no model called</b>: the representations were stored when each document was read</span></p>
-    </>
+    <div key={lens} className="answer" style={{ ['--lens-color' as string]: meta.color }}>
+      <p className="answer-how">{meta.how}</p>
+      <p className="answer-office">{best.name}</p>
+      <p className="answer-line">{lens === 'pdf'
+        ? (best.document ? <Highlight doc={best.document} /> : 'no document shares a word with the question')
+        : best.sentence ?? '—'}</p>
+      {rest.length > 0 && <p className="answer-rest">then {rest.slice(0, 2).map((h) => h.name).join(' · ')}</p>}
+    </div>
   );
 }
 
-function Hits({ hits }: { hits: LensHit[] }) {
-  if (!hits.length) return <p className="empty">no match</p>;
+/** The document line with the question's words marked, so the ColBERT match is visible word by word. */
+function Highlight({ doc }: { doc: MatchedDocument }) {
+  const marked = new Set(doc.words);
   return (
-    <ol>
-      {hits.slice(0, 3).map((hit) => (
-        <li key={hit.office_id} title={hit.matched ?? undefined}>
-          <span>{hit.name}<span className="matched">{hit.matched ?? ''}</span></span>
-          <span className="score num">{hit.score.toFixed(2)}</span>
-        </li>
-      ))}
-    </ol>
+    <span className="mono-line">
+      {doc.text.split(/([^\p{L}\p{N}]+)/u).map((part, i) =>
+        marked.has(part.toLowerCase()) ? <mark key={i}>{part}</mark> : <span key={i}>{part}</span>)}
+    </span>
   );
 }
+
