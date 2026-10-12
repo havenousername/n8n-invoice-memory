@@ -17,7 +17,8 @@ CROSS_CHECK_FIXTURE = Path(__file__).resolve().parent.parent / "workflows" / "co
 
 
 def expected_positions(issued_rows: Iterable[Mapping], offices: Iterable[Mapping]) -> dict:
-    """Per office: lines per category, deals, and counts. Highest version per key is current; resends are duplicates."""
+    """Per office: lines per category, deals, counts, and the current version of each key with its issued amount.
+    Highest version per key is current; resends are duplicates."""
     result = {}
     rows = list(issued_rows)
     for office in offices:
@@ -44,6 +45,7 @@ def expected_positions(issued_rows: Iterable[Mapping], offices: Iterable[Mapping
         result[office["office_id"]] = {
             "lines": lines, "booked": round(booked, 2), "deal_count": deals,
             "superseded_count": superseded, "duplicate_count": len(duplicates),
+            "current": {r["doc_key"]: {"version": r["version"], "amount": r["amount"]} for r in current},
         }
     return result
 

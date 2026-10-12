@@ -145,7 +145,25 @@
    "booked": 300000.0,
    "deal_count": 1,
    "superseded_count": 1,
-   "duplicate_count": 1
+   "duplicate_count": 1,
+   "current": {
+    "PO-5000": {
+     "version": 2,
+     "amount": 132000
+    },
+    "PO-5001": {
+     "version": 1,
+     "amount": 20000
+    },
+    "DEAL-6000": {
+     "version": 1,
+     "amount": 300000
+    },
+    "CN-7000": {
+     "version": 1,
+     "amount": 25000
+    }
+   }
   },
   "paris": {
    "lines": {
@@ -188,7 +206,17 @@
    "booked": 50000.0,
    "deal_count": 1,
    "superseded_count": 0,
-   "duplicate_count": 0
+   "duplicate_count": 0,
+   "current": {
+    "PO-5002": {
+     "version": 1,
+     "amount": 80000
+    },
+    "DEAL-6001": {
+     "version": 1,
+     "amount": 50000
+    }
+   }
   }
  }
 }

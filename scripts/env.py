@@ -15,6 +15,7 @@ _FIELDS = {
     "OPENROUTER_MODEL": "openrouter_model",
     "PDF_ENGINE": "pdf_engine",
     "N8N_BASE_URL": "n8n_base_url",
+    "N8N_DASHBOARD_SECRET": "n8n_dashboard_secret",
 }
 _URL_KEYS = ("QDRANT_URL", "N8N_BASE_URL")
 
@@ -27,6 +28,7 @@ class Settings:
     openrouter_model: str = ""
     pdf_engine: str = "native"
     n8n_base_url: str = ""
+    n8n_dashboard_secret: str = ""
 
 
 class MissingSetting(Exception):

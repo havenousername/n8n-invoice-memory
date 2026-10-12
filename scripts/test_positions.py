@@ -21,6 +21,7 @@ class ExpectedPositionsTest(unittest.TestCase):
         self.assertEqual(result["paris"]["lines"]["travel"],
                          {"budget": 70000, "committed": 0, "credited": 0, "remaining": 70000, "over_by": 0})
         self.assertEqual((result["paris"]["booked"], result["paris"]["deal_count"]), (0, 0))
+        self.assertEqual(result["paris"]["current"], {})
 
     def test_costs_sum_per_category_and_over_plan(self):
         result = expected_positions([issued("PO-5002", "cost", 80000, "travel", office="paris")], OFFICES)
@@ -32,6 +33,7 @@ class ExpectedPositionsTest(unittest.TestCase):
         result = expected_positions(rows, OFFICES)["berlin"]
         self.assertEqual(result["lines"]["gpu"]["committed"], 132000)
         self.assertEqual(result["superseded_count"], 1)
+        self.assertEqual(result["current"], {"PO-5000": {"version": 2, "amount": 132000}})
 
     def test_credit_larger_than_committed_floors_at_zero(self):
         rows = [issued("PO-5001", "cost", 20000, "cloud"), issued("CN-7000", "credit", 25000, "cloud")]
