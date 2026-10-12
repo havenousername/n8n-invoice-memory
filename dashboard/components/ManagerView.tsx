@@ -85,7 +85,7 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
 
       <main className={`split${askOpen ? '' : ' ask-closed'}`}>
         <div className="left">
-          {feed.cards ? <Spotlight spot={spot} times={feed.times} corrections={feed.corrections} /> : <div className="skeleton spot-skeleton" aria-hidden="true" />}
+          {feed.cards ? <Spotlight spot={spot} times={feed.times} corrections={feed.corrections} now={now} /> : <div className="skeleton spot-skeleton" aria-hidden="true" />}
           <OfficesPanel cards={slots} now={now} view={officeView} onView={setView} flashFor={freshFlash} lensFor={lensOf} />
         </div>
         <AskPanel manager={manager} answer={liveAnswer} onAnswer={onAnswer} lens={lens} onLens={setLens}

@@ -5,16 +5,17 @@ import { BOOTH_POOL } from '@/lib/pool';
 import { euro } from '@/lib/format';
 import type { DocumentEntry, OfficeCard } from '@/lib/shape';
 import type { Spotlight as Spot } from '@/lib/spotlight';
+import { summaryStatus } from '@/lib/summary';
 import { CountUp } from './motion';
 
 export type StageTimes = Record<string, { received?: number; rough?: number; sharp?: number; summary?: number }>;
 export type Correction = { from: number | null; to: number | null };
 
-type Props = { spot: Spot; times: StageTimes; corrections: Record<string, Correction> };
+type Props = { spot: Spot; times: StageTimes; corrections: Record<string, Correction>; now: number };
 
 const HEADLINE = { error: 'Read failed', running: 'Reading now', attention: 'Needs attention', latest: 'Latest document', idle: 'Waiting for the first document' };
 
-export function Spotlight({ spot, times, corrections }: Props) {
+export function Spotlight({ spot, times, corrections, now }: Props) {
   if (spot.kind === 'idle') {
     return (
       <section className="panel spotlight" data-kind="idle" aria-label="Latest document">
@@ -44,7 +45,7 @@ export function Spotlight({ spot, times, corrections }: Props) {
           {spot.kind === 'error' && <span className="spot-error">{doc.error || 'unknown error'}</span>}
         </div>
       </div>
-      {doc.kind !== 'duplicate' && <Progress doc={shown} office={office} times={times[shown.document_id] ?? {}} failed={spot.kind === 'error'} />}
+      {doc.kind !== 'duplicate' && <Progress doc={shown} office={office} times={times[shown.document_id] ?? {}} failed={spot.kind === 'error'} now={now} />}
     </section>
   );
 }
@@ -85,24 +86,28 @@ function Paper({ doc, office, reading }: { doc: DocumentEntry; office: OfficeCar
   );
 }
 
-/** One line through n8n's four stages; each dot lights when the poll sees the stage, with its time since arrival. */
-function Progress({ doc, office, times, failed }: { doc: DocumentEntry; office: OfficeCard; times: StageTimes[string]; failed: boolean }) {
-  const summarized = doc.stage === 2 && office.pending_count === 0 && office.summary_stage === 3;
+/** One line through n8n's four stages; each dot lights when the poll sees the stage, with its time since arrival.
+ * The last step tells where the office's cached summary stands: rewritten, being rewritten, or out of date. */
+function Progress({ doc, office, times, failed, now }: { doc: DocumentEntry; office: OfficeCard; times: StageTimes[string]; failed: boolean; now: number }) {
+  const summary = summaryStatus(office, now);
   const t0 = times.received;
   const after = (t?: number) => (t !== undefined && t0 !== undefined ? `+${Math.max(0, Math.round((t - t0) / 1000))} s` : '');
+  const sharp = doc.stage === 2;
+  const summaryState = !sharp ? 'waiting' : summary.state === 'current' ? 'done' : summary.state === 'updating' ? 'active' : 'stale';
+  const summaryWho = !sharp ? 'after every read' : summary.state === 'current' ? `cached in Qdrant${after(times.summary) ? ` · ${after(times.summary)}` : ''}` : summary.label;
   const steps = [
-    { name: 'Received', who: 'n8n', done: true, active: false, t: t0 !== undefined ? '0 s' : '' },
-    { name: 'Rough read', who: 'n8n regex', done: doc.stage >= 1 || doc.stage === -1, active: doc.stage === 0, t: after(times.rough) },
-    { name: 'Vision read', who: 'n8n + model', done: doc.stage === 2, active: doc.stage === 1, t: after(times.sharp), failed },
-    { name: 'Summary', who: 'cached in Qdrant', done: summarized, active: doc.stage === 2 && !summarized, t: after(times.summary) },
+    { name: 'Received', who: `n8n${t0 !== undefined ? ' · 0 s' : ''}`, state: 'done' },
+    { name: 'Rough read', who: `n8n regex${after(times.rough) ? ` · ${after(times.rough)}` : ''}`, state: doc.stage >= 1 || doc.stage === -1 ? 'done' : doc.stage === 0 ? 'active' : 'waiting' },
+    { name: 'Vision read', who: `n8n + model${after(times.sharp) ? ` · ${after(times.sharp)}` : ''}`, state: failed ? 'failed' : sharp ? 'done' : doc.stage === 1 ? 'active' : 'waiting' },
+    { name: 'Summary', who: summaryWho, state: summaryState },
   ];
   return (
     <ol className="progress" aria-label="Stages">
       {steps.map((s) => (
-        <li key={s.name} data-state={s.failed ? 'failed' : s.done ? 'done' : s.active ? 'active' : 'waiting'}>
+        <li key={s.name} data-state={s.state}>
           <span className="dot" aria-hidden="true" />
           <span className="step-name">{s.name}</span>
-          <span className="step-who">{s.who}{s.t && <> · <span className="num">{s.t}</span></>}</span>
+          <span className="step-who">{s.who}</span>
         </li>
       ))}
     </ol>

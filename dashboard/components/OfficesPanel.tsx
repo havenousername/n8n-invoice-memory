@@ -2,12 +2,13 @@
 // The offices canvas, with a switch like the hyperbolic tour's: Chart shows one line per office (percent of its
 // budget committed, replayed from its point); Point opens one office's Qdrant point (payload and three vectors).
 // The info boxes beside it hold each office's cached summary; clicking a line or a box opens that point.
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, LoaderCircle, Sparkles, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { clock, compactEuro, euro } from '@/lib/format';
 import { pointAnatomy } from '@/lib/point';
 import type { OfficeCard } from '@/lib/shape';
 import type { SeenEvent } from '@/lib/spotlight';
+import { summaryStatus, type SummaryStatus } from '@/lib/summary';
 import { officeTimeline, type TimelinePoint } from '@/lib/timeline';
 import type { LensKey } from './LensColumns';
 import { Typewriter } from './motion';
@@ -42,11 +43,11 @@ export function OfficesPanel({ cards, now, view, onView, flashFor, lensFor }: Pr
       </header>
       <div className="offices-body">
         {pointCard
-          ? <PointView key={pointCard.office_id} card={pointCard} color={colorOf(pointCard.office_id)} />
+          ? <PointView key={pointCard.office_id} card={pointCard} color={colorOf(pointCard.office_id)} status={summaryStatus(pointCard, now)} />
           : <OfficeChart cards={shown} now={now} onOpen={open} />}
         <div className="boxes">
           {cards.map((card, i) => card
-            ? <OfficeBox key={card.office_id} card={card} color={OFFICE_COLORS[i]} flash={flashFor(card.office_id)}
+            ? <OfficeBox key={card.office_id} card={card} color={OFFICE_COLORS[i]} flash={flashFor(card.office_id)} status={summaryStatus(card, now)}
                 lens={lensFor(card.office_id)} selected={pointCard?.office_id === card.office_id} onOpen={() => open(card.office_id)} />
             : <div key={`empty-${i}`} className="skeleton box" aria-hidden="true" />)}
         </div>
@@ -150,7 +151,7 @@ function Marker({ p, cx, cy, fresh }: { p: TimelinePoint; cx: number; cy: number
 }
 
 /** One office's Qdrant point: what the payload holds, and what each of the three vectors was built from. */
-function PointView({ card, color }: { card: OfficeCard; color: string }) {
+function PointView({ card, color, status }: { card: OfficeCard; color: string; status: SummaryStatus }) {
   const anatomy = pointAnatomy(card);
   const over = card.lines.filter((l) => l.status === 'over');
   return (
@@ -176,7 +177,7 @@ function PointView({ card, color }: { card: OfficeCard; color: string }) {
         <section aria-label="Vectors">
           <h3>Vectors</h3>
           <dl className="vectors">
-            <dt><b>summary</b> · dense, 384</dt>
+            <dt><b>summary</b> · dense, 384 · <span className="summary-status" data-state={status.state}>{status.label}</span></dt>
             <dd className="quote">{card.summary_text ? `“${card.summary_text}”` : 'no summary yet'}</dd>
             <dt><b>digest</b> · ColBERT, one vector per token</dt>
             <dd className="mono">{anatomy.digest.slice(0, 2).map((line) => <span key={line}>{line}</span>)}{anatomy.digest.length > 2 && <span>+ {anatomy.digest.length - 2} lines</span>}{!anatomy.digest.length && 'no lines yet'}</dd>
@@ -189,10 +190,9 @@ function PointView({ card, color }: { card: OfficeCard; color: string }) {
   );
 }
 
-type BoxProps = { card: OfficeCard; color: string; flash?: SeenEvent; lens?: LensKey; selected: boolean; onOpen: () => void };
+type BoxProps = { card: OfficeCard; color: string; flash?: SeenEvent; status: SummaryStatus; lens?: LensKey; selected: boolean; onOpen: () => void };
 
-function OfficeBox({ card, color, flash, lens, selected, onOpen }: BoxProps) {
-  const reading = card.pending_count > 0;
+function OfficeBox({ card, color, flash, status, lens, selected, onOpen }: BoxProps) {
   const key = flash ? `${flash.kind}-${flash.document_id ?? ''}-${flash.seenAt}` : null;
   const over = card.lines.filter((l) => l.status === 'over');
   return (
@@ -207,10 +207,23 @@ function OfficeBox({ card, color, flash, lens, selected, onOpen }: BoxProps) {
         <span className="box-total num">{compactEuro(card.committed)}</span>
         {over.length > 0 && <span className="chip" data-tone="error"><CircleAlert size={13} aria-hidden="true" /> over plan</span>}
       </span>
-      <span className={`summary${reading ? ' blurred' : ''}`} data-fresh={card.summary_stage === 3}>
-        <Typewriter text={card.summary_text || 'No documents yet.'} play={flash?.kind === 'summary' ? key : null} />
+      <span className="summary-wrap" data-state={status.state}>
+        <span className="summary" data-fresh={status.state === 'current'}>
+          <Typewriter text={card.summary_text || 'No documents yet.'} play={flash?.kind === 'summary' ? key : null} />
+        </span>
       </span>
+      <SummaryLine status={status} />
     </button>
+  );
+}
+
+/** Where the cached summary stands; while updating, the old one is still the one served. */
+export function SummaryLine({ status }: { status: SummaryStatus }) {
+  const Icon = status.state === 'updating' ? LoaderCircle : status.state === 'stale' ? TriangleAlert : Sparkles;
+  return (
+    <span className="summary-status" data-state={status.state}>
+      <Icon size={14} className={status.state === 'updating' ? 'spin' : undefined} aria-hidden="true" /> {status.label}
+    </span>
   );
 }
 
