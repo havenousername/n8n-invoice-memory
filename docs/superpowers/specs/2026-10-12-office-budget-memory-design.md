@@ -6,13 +6,23 @@ Booth demo for n8n In The Loop 2026, Ecosystem Day, Berlin, 2026-10-14.
 
 ## 1. Goal
 
-A fictional software company, Halden Software GmbH, runs six offices in two regions. Office controllers send a constant stream of German documents: purchase commitments, client deals, amendments to both, and the occasional duplicate. n8n takes every document in, reads it in stages, and rebuilds one Qdrant point per office: the office's live budget position, its documents, and a cached summary. Regional managers watch their offices on a dashboard; each sees only their own region.
+A fictional software company, Q8nten GmbH, runs six offices in two regions. The name reads as German *Quanten* and carries the Q of Qdrant and the 8n of n8n. Office controllers send a constant stream of German documents: purchase commitments, client deals, credit notes, amendments to all three, and the occasional duplicate. n8n takes every document in, reads it in stages, and rebuilds one Qdrant point per office: the office's live budget position, its documents, and a cached summary. Regional managers watch their offices on a dashboard; each sees only their own region.
 
 A visitor leaves with three answers:
 
 1. **Why n8n.** The uploads and the handling that people used to do by hand (intake, checking for duplicates, reading, retrying, keeping summaries current) run as workflows, including a simulated working day.
 2. **Why Qdrant.** One point carries three vector representations with different meanings: exact words and codes, single document lines, and the office's overall situation. The dashboard shows each one's answer and the fused answer from one request.
 3. **The feature.** Caching and handling documents in a multi-tenant, high-volume setting where information arrives duplicated, goes out of date, and needs constant upkeep. Expensive reading happens once per document; every question after that is answered from the point in milliseconds, with no model call.
+
+**What is new, said so it survives scrutiny.** Most document demos cut files into chunks and retrieve chunks. Here each office is one living point, a pattern the booth calls *progressive entity memory*:
+- the point improves as each document is read (rough, then sharp, then summarized) and is served at every stage;
+- it rewrites its own summary when its facts change (the revision fingerprint is the cache invalidation);
+- it carries several representations, each made for a different kind of information;
+- n8n keeps it maintained: intake, duplicates, amendments, reconcile sweeps, and summary refreshes, with nobody clicking.
+
+House rule from the earlier spec still holds: never claim "only Qdrant can do this"; say "in one request" and show the request.
+
+**The demo sells it.** Visuals are bold and animated, every concept is explained in a sentence on screen, and every animation is triggered by a real state change read from Qdrant (section 6). Nothing on screen is decorative or faked.
 
 Success at the booth:
 - From the aisle, a passer-by sees cards update as documents arrive, rough first, then corrected.
@@ -21,7 +31,7 @@ Success at the booth:
 
 ## 2. Domain
 
-**Company:** Halden Software GmbH (fictional). Quarter: Q4 2026; documents are dated October 2026.
+**Company:** Q8nten GmbH (fictional). Quarter: Q4 2026; documents are dated October 2026.
 
 **Tenants and offices.** Shard keys `m_anna` and `m_ben` are unchanged.
 
@@ -44,6 +54,9 @@ Success at the booth:
 |---|---|---|
 | Purchase commitment (*Bestellung*) | `PO-1042` | Belegnummer, Version, Datum, Kostenstelle, Lieferant, Kategorie, Beschreibung, Betrag |
 | Client deal (*Kundenauftrag*) | `DEAL-2207` | Belegnummer, Version, Datum, Kostenstelle, Kunde, Beschreibung, Auftragswert |
+| Credit note (*Gutschrift*) | `CN-3001` | Belegnummer, Version, Datum, Kostenstelle, Lieferant, Kategorie, Beschreibung, Betrag |
+
+**Money flows.** Commitments take budget from a category, credit notes give budget back to a category, and deals add bookings to the office. The dashboard animates all three as flows.
 
 - **Amendment:** the same key with a higher version, printed as "Version 2 (ersetzt Version 1)". The highest version present is current; older versions are superseded, kept, and counted, never summed.
 - **Duplicate:** a byte-identical copy of a document already received, for example the same file arriving by email and portal.
@@ -56,7 +69,7 @@ The pool reserves three documents for the booth beats, outside the simulator's s
 
 Two Data Tables are the source of truth; Qdrant holds a view rebuilt from them.
 
-**`documents`** (one row per received file): `document_id` (business key), `doc_key`, `version` (number), `doc_type` (`cost`, `deal`), `kind` (`document`, `duplicate`), `duplicate_of`, `office_id`, `manager_id`, `worker_id`, `pdf_hash`, `filename`, `text`, `stage` (number: 0 received, 1 rough, 2 sharp, -1 error), `regex_fields`, `llm_fields`, `error`, `received_at` (date).
+**`documents`** (one row per received file): `document_id` (business key), `doc_key`, `version` (number), `doc_type` (`cost`, `deal`, `credit`), `kind` (`document`, `duplicate`), `duplicate_of`, `office_id`, `manager_id`, `worker_id`, `pdf_hash`, `filename`, `text`, `stage` (number: 0 received, 1 rough, 2 sharp, -1 error), `regex_fields`, `llm_fields`, `error`, `received_at` (date).
 
 **`offices`**: `office_id`, `manager_id`, `name`, `narrative`, `narrative_at` (date), `narrative_revision`.
 
@@ -71,7 +84,7 @@ New collection `offices`, created and verified by `scripts/setup_collection.py` 
 ```
 office_id, manager_id, name, region
 stage, pending_count               // min stage of current documents; documents not yet sharp
-lines[]                            // per category: category, name, budget, committed, remaining, over_by
+lines[]                            // per category: category, name, budget, committed, credited, remaining, over_by
 committed, budget, used_pct        // totals over all categories
 booked, deal_count                 // current deals
 documents[]                        // key, version, type, kind, counterparty, category, amount, description_en,
@@ -89,6 +102,9 @@ updated_at
 | `bm25` (sparse) | raw German text of every document plus the English descriptions | Keyword | exact codes and names: `PO-1042`, `CC-BER-01`, "Hetzner" |
 | `digest` (ColBERT multivector) | one English line per current document | Line | one specific commitment: "GPU servers for the inference launch" |
 | `summary` (dense) | the office summary | Meaning | the situation: "which office is overspending on travel?" |
+| `page` (image, gated) | the rendered PDF page of the latest document | Looks like | documents by appearance: "the one with the red stamp" |
+
+The `page` vector makes the multimodal claim literal: the first three are text representations. It ships only if the day-1 gate proves an image model on the cluster's Cloud Inference; otherwise it is cut and the booth says "three representations", not "multimodal".
 
 The vision read returns an English description of every document, so English questions match German documents in the Line and Meaning lenses.
 
@@ -110,7 +126,7 @@ Generated as importable JSON by `scripts/build_workflows.py`, as today: no insta
 | `01 Ingest` | The phone Form, reduced to Form, `01b`, and a Duplicate or Received page. One dropdown: the document pool. |
 | `02 Process` | Same stages and error routing. The rough read parses the German labels and converts the date; it misreads every German amount by a factor of 1,000, on purpose. The vision read uses a strict schema: `doc_type`, `doc_key`, `version`, `office`, `date`, `counterparty`, `category` (one of five, or none for deals), `amount`, `description_en`. Validation checks each field. |
 | `02b Write the summary` | Three sentences about the office's budget position: committed against budget, categories over plan, deals booked, and the most recent change, including amendments. Same freshness rule and fingerprint. |
-| `03 Rebuild office point` | Same shape. The view takes the highest version of each key as current, counts superseded and duplicate rows without summing them, sums current costs per category against the budget, sums current deals, and computes the stage, latest document, and summary freshness. |
+| `03 Rebuild office point` | Same shape. The view takes the highest version of each key as current, counts superseded and duplicate rows without summing them, sums current costs and credit notes per category against the budget, sums current deals, and computes the stage, latest document, and summary freshness. |
 | `05 Dashboard writes` | `POST /send` (file) to `01b`, answering with its JSON; `POST /day/stop` sets `running` to false. Every webhook requires the dashboard's secret header. |
 | `06 Reconcile` (new) | Every 5 minutes and at the end of each burst, rebuilds all six office points from the tables, so a view written out of order by overlapping runs is replaced within minutes. |
 
@@ -142,6 +158,20 @@ Next.js (App Router, TypeScript) in `dashboard/`, run locally for the booth; Ver
 - "What n8n is doing": the pipeline as n8n-style nodes (three intakes, Form, Console, Working day, into Check and record, Extract text, Rough read, Vision read, Summary), each stage dropping into Rebuild and the office point, the active node lit, observed timings under each.
 - The collection disk if time allows.
 
+**Animations that show real work.** Each one starts from a state change the poll observed in Qdrant; with reduced motion each becomes an instant state change:
+
+| Animation | Triggered by | Explains |
+|---|---|---|
+| Document journey: the PDF arrives from its source, n8n nodes light up, the rough read highlights the misread amount on the page, a scan line sweeps the page during the vision read, the fields fly into the office point, which sharpens | a new document, then each stage change | why n8n; stages served as they finish |
+| Three lenses: the query splits into Keyword, Line, and Meaning beams that hit different offices, then fuse into one ranking | an Ask response | why Qdrant; representations mean different things |
+| Cache counter: "model calls saved" and "answered from memory in N ms" count up | every Ask response and every poll | the caching |
+| Amendment: the old figure is struck through and slides into the office's history; the summary rewrites itself | a document turning superseded, then a new `source_revision` | outdated data handled |
+| Duplicate: the incoming document bounces off a "seen before" stamp | a duplicate row | duplicates handled |
+| Money flows: deals flow in, commitments and credit notes flow between offices and categories | each sharp document | different money flows |
+| Shard swap: switching manager swaps the shard; only that region's offices light | a manager switch | multi-tenancy |
+
+Each concept gets one plain sentence on screen next to its animation.
+
 **Behavior.** Polls every 2 seconds after the previous request settles; drops responses for a manager or query that is no longer current; three failed polls show "offline, showing last known offices". Animations never gate data. Server text renders as text. Design: Qdrant brand, as in prototype v3.
 
 ## 7. Error handling
@@ -158,14 +188,14 @@ Next.js (App Router, TypeScript) in `dashboard/`, run locally for the booth; Ver
 ## 8. Verification
 
 - Unit tests: rough read (German labels, dates, the ×1000 misread), validation of the new schema, the office view (versions, superseded, duplicates, budgets, over plan), card and lens shaping, manifest invariants, generated workflow structure, and each Code node run in the sandbox harness.
-- Live gates, in order: the OpenRouter check on one purchase commitment and one deal (all fields, English description, amount corrected); the smoke test on a disposable `offices`-shaped collection including the over-plan filter and the four-search batch; a 10-document burst whose resulting points match expectations computed from the manifest (a rewritten corpus check).
+- Live gates, in order: the OpenRouter check on one purchase commitment, one deal, and one credit note (all fields, English description, amount corrected); the smoke test on a disposable `offices`-shaped collection including the over-plan filter and the four-search batch; a 10-document burst whose resulting points match expectations computed from the manifest (a rewritten corpus check).
 - Rehearsal: reset, seed burst, then the 60-second script three times.
 
 ## 9. Build order and cuts
 
 Order: spec, samples and the extraction gate, pure logic, Qdrant collection and smoke, workflows and import, dashboard, live burst, rehearsal.
 
-Cut first if time runs short: the disk, the console's pipeline animation detail (keep the stage list), the tape, Vercel. Never cut: the three lenses, the duplicate and amendment moments, tenancy.
+Cut first if time runs short: the `page` vector (if its gate fails it is cut anyway), the disk, the console's pipeline animation detail (keep the stage list), the tape, Vercel. Never cut: the three lenses, the document journey, the cache counter, the duplicate and amendment moments, tenancy.
 
 ## 10. Booth script
 
@@ -176,4 +206,4 @@ Cut first if time runs short: the disk, the console's pipeline animation detail 
 5. Ask "GPU servers for the inference launch": Keyword, Line, and Meaning answer differently; the fused answer is on top.
 6. Switch from Anna to Ben: only West's offices.
 
-Close: "n8n does the handling, Qdrant keeps the memory. The request is on the card."
+Close: "Not chunks, memory. n8n does the handling, Qdrant keeps the memory. The request is on the card."
