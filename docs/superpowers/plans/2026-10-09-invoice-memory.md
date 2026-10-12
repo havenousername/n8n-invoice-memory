@@ -469,20 +469,24 @@ Pick an invoice (Form: `Invoice` dropdown of the 14 manifest files, `Worker` dro
 - Decide the rows keeps the first worker and the existing name of a known customer; the invoice row records who submitted it. The upsert writes only `customer_id`, `manager_id`, `worker_id`, and `name`, so narrative and `deleted_at` survive.
 - Deviations from the earlier draft: display names come from the manifest (`Acme GmbH`, as printed on the PDF); the disabled Google Drive node is a sticky note instead, since a disabled node still demands a Google credential on import.
 
-- [ ] **Step 4: Import and bind** (n8n Cloud)
+- [x] **Step 4: Import and bind** (n8n Cloud)
 
 Create the `OpenRouter bearer` credential. Delete any earlier imports of these workflows, then import `03-rebuild-point.json`, `02b-narrative.json`, `02-process.json`, and `01-ingest.json`, in that order. In each, select the credentials on HTTP nodes, set `QDRANT_URL` in the Config of 03 and 02b, and select the target workflow in every Execute Sub-workflow node (its subtitle names it); there is no input mapping to fill. Save all four; activate `01 Ingest`.
 
-- [ ] **Step 5: Run the pipeline without the Form**
+- [x] **Step 5: Run the pipeline without the Form** (superseded by Step 6)
 
-Open `02 Process` and execute it with its pinned input.
+Result on 2026-10-12: the pinned input did not survive the import, so a run started from the editor had an empty item and `03` failed with `no customer row for undefined/undefined` (execution 33). The Form path below is the real test. Follow-up: each sub-workflow should check its input contract first and name what is missing.
+
+Originally: open `02 Process` and execute it with its pinned input.
 Run: `python3 scripts/check_point.py m_anna acme --show stage,pending_count,latest.amount,summary_stage`
 Expected: `stage=2 pending_count=0 latest.amount=12300 summary_stage=3`, so 02, 02b, and 03 all worked.
 
-- [ ] **Step 6: Test the Form happy path**
+- [x] **Step 6: Test the Form happy path**
 
 Delete the seed invoice rows `inv_seed_a` and `inv_seed_b` from `invoices`. Open the Form URL, pick `acme-001.pdf` and worker Tom, submit. Poll every 5 s for up to 60 s with the command from Step 5.
 Expected sequence: `stage=0 pending_count=1 latest.amount=null summary_stage=1` within 3 s → `stage=1 pending_count=1 latest.amount=12.3 summary_stage=1` within 6 s → `stage=2 pending_count=0 latest.amount=12300 summary_stage=1` within 40 s → `summary_stage=3` a few seconds later. The amount flips from 12.3 to 12300 (the booth moment).
+
+Result on 2026-10-12: `gamma-001.pdf` with Mia (executions 26 and 27) gave `m_ben/gamma` at stage 2 and rung 3 about 14 s after submission, every field equal to the manifest and a narrative present. `acme-001.pdf` with Tom gave `m_anna/acme` at stage 2 with `latest.amount` 12300 from the German total, status overdue, rung 3 with a narrative, after the seed rows were deleted. The coarse 12.3 stage passed between polls; the dashboard is where the flip is watched.
 
 - [ ] **Step 7: Test the duplicate path**
 
