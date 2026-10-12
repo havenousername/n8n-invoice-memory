@@ -24,6 +24,11 @@ class ManifestTest(unittest.TestCase):
         strip = lambda r: {k: v for k, v in r.items() if k not in ("file", "duplicate_of")}
         self.assertEqual(strip(duplicates[0]), strip(original))
 
+    def test_rows_carry_the_customer_display_name(self):
+        names = {r["customer"]: r["customer_name"] for r in self.manifest}
+        self.assertEqual(names["acme"], "Acme GmbH")
+        self.assertEqual(names, {slug: name for slug, (_, name) in CUSTOMERS.items()})
+
     def test_file_names_start_with_the_customer_slug(self):
         for row in self.manifest:
             self.assertTrue(row["file"].startswith(row["customer"] + "-"), row["file"])

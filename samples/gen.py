@@ -116,6 +116,7 @@ def manifest_row(invoice: Invoice) -> dict:
         "file": invoice.file,
         "worker_id": CUSTOMERS[invoice.customer][0],
         "customer": invoice.customer,
+        "customer_name": CUSTOMERS[invoice.customer][1],
         "invoice_no": invoice.invoice_no,
         "expected_amount": invoice.amount,
         "status": invoice.status,

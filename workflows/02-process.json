@@ -1,0 +1,871 @@
+{
+  "name": "02 Process",
+  "nodes": [
+    {
+      "id": "bd65a1ac-063e-5934-beea-d38f4fec615b",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "invoice_id",
+              "type": "string"
+            },
+            {
+              "name": "customer_id",
+              "type": "string"
+            },
+            {
+              "name": "manager_id",
+              "type": "string"
+            },
+            {
+              "name": "sample_url",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2ec1f06c-c84d-5599-afba-442bbc168247",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "764de75e-7827-58cf-ad61-b4ab232bf61e",
+              "name": "OPENROUTER_MODEL",
+              "value": "anthropic/claude-haiku-5.5",
+              "type": "string"
+            },
+            {
+              "id": "f37cd3d9-321f-54f1-8fc7-cbc2d3330bd4",
+              "name": "PDF_ENGINE",
+              "value": "native",
+              "type": "string"
+            },
+            {
+              "id": "19efa4a2-9c51-5f51-a330-cacb310403b6",
+              "name": "SAMPLES_BASE_URL",
+              "value": "https://raw.githubusercontent.com/havenousername/n8n-invoice-memory/main/samples",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "59c908f3-fd1f-5dee-87dc-ce1746284bb7",
+      "name": "Show the point as received",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "03 Rebuild point"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_id": "={{ $('Config').first().json.customer_id }}",
+            "manager_id": "={{ $('Config').first().json.manager_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "1a7bd5af-fcf3-5a85-b032-a78ba28cfc91",
+      "name": "Download the PDF for processing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.sample_url.startsWith($('Config').first().json.SAMPLES_BASE_URL + '/') ? $('Config').first().json.sample_url : 'https://sample-url-outside-SAMPLES_BASE_URL.invalid' }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "07455c3f-e767-5e7c-9642-7504e2eba13d",
+      "name": "Prepare the vision request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const VISION_REQUEST_TEMPLATE = {\"model\": \"\", \"temperature\": 0, \"max_tokens\": 400, \"response_format\": {\"type\": \"json_schema\", \"json_schema\": {\"name\": \"invoice\", \"strict\": true, \"schema\": {\"type\": \"object\", \"properties\": {\"invoice_no\": {\"type\": \"string\"}, \"date\": {\"type\": \"string\", \"description\": \"YYYY-MM-DD\"}, \"due_date\": {\"type\": \"string\", \"description\": \"YYYY-MM-DD\"}, \"amount\": {\"type\": \"number\", \"description\": \"total in EUR\"}, \"vendor\": {\"type\": \"string\"}, \"customer_name\": {\"type\": \"string\"}, \"status\": {\"type\": \"string\", \"enum\": [\"open\", \"paid\", \"overdue\"]}, \"line_items_summary\": {\"type\": \"string\", \"description\": \"max 12 words\"}}, \"required\": [\"invoice_no\", \"date\", \"due_date\", \"amount\", \"vendor\", \"customer_name\", \"status\", \"line_items_summary\"], \"additionalProperties\": false}}}, \"plugins\": [{\"id\": \"file-parser\", \"pdf\": {\"engine\": \"\"}}], \"messages\": [{\"role\": \"system\", \"content\": \"You read one invoice PDF and return JSON only with keys: invoice_no, date (YYYY-MM-DD), due_date (YYYY-MM-DD), amount (number in EUR, no thousands separators), vendor, customer_name, status (one of: open, paid, overdue), line_items_summary (max 12 words).\"}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Extract the fields.\"}, {\"type\": \"file\", \"file\": {\"filename\": \"invoice.pdf\", \"file_data\": \"data:application/pdf;base64,\"}}]}]};\n// Glue for \"Prepare the vision request\" in 02 Process. build_workflows.py injects VISION_REQUEST_TEMPLATE above it:\n// scripts/openrouter_check.py's extraction_body with an empty PDF, so n8n sends the request the live gate tested.\n// The binary passes through for \"Pull the text out of the PDF\".\nconst cfg = $('Config').first().json;\nconst pdf = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst body = JSON.parse(JSON.stringify(VISION_REQUEST_TEMPLATE));\nbody.model = cfg.OPENROUTER_MODEL;\nbody.plugins[0].pdf.engine = cfg.PDF_ENGINE;\nbody.messages[1].content.find((part) => part.type === 'file').file.file_data += pdf.toString('base64');\nreturn [{ json: { body }, binary: $input.first().binary }];\n"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "61cb6573-6fec-535c-94ea-262cec68ec7b",
+      "name": "Pull the text out of the PDF",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "bcd3501a-b461-5e19-af0f-85eed107e2e9",
+      "name": "Coarse read with regex",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Stage 1: a regex read of the extracted PDF text. Pasted into n8n Code nodes without the module.exports line.\n// ponytail: deliberately naive. \"4,250.00\" parses right, \"12.300,00\" parses as 12.3; the vision stage corrects it.\n\nfunction coarseRead(text) {\n  const t = text || '';\n  const grab = (re) => {\n    const m = t.match(re);\n    return m ? m[1].trim() : null;\n  };\n  const rawTotal = grab(/total[^0-9]*([0-9][0-9.,]*)/i);\n  return {\n    invoice_no: grab(/invoice\\s*(?:no\\.?|number|#)\\s*[:#]?\\s*([A-Z0-9-]+)/i),\n    date: grab(/(?<!due\\s)date\\s*:?\\s*(\\d{4}-\\d{2}-\\d{2})/i),\n    due_date: grab(/due\\s*(?:date)?\\s*:?\\s*(\\d{4}-\\d{2}-\\d{2})/i),\n    amount: rawTotal === null ? null : parseFloat(rawTotal.replace(/,/g, '')),\n    vendor: grab(/from\\s*:?\\s*([^\\n]+)/i),\n  };\n}\n\n// Glue for \"Coarse read with regex\" in 02 Process; coarse.js is pasted above it. Empty text (a scanned PDF) is valid.\nconst text = $json.text || '';\nreturn [{ json: { regex_fields: JSON.stringify(coarseRead(text)), text } }];\n"
+      }
+    },
+    {
+      "id": "37fa76fe-71ea-5df0-befc-2549c5345afb",
+      "name": "Update the row: stage 1",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoices"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "invoice_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.invoice_id }}"
+            },
+            {
+              "keyName": "customer_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.customer_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.manager_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "stage": "={{ 1 }}",
+            "regex_fields": "={{ $('Coarse read with regex').first().json.regex_fields }}",
+            "text": "={{ $('Coarse read with regex').first().json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "stage",
+              "displayName": "stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "regex_fields",
+              "displayName": "regex_fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2a19a9bd-fa4d-5508-8fde-9c511a49fd05",
+      "name": "Show the coarse view",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "03 Rebuild point"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_id": "={{ $('Config').first().json.customer_id }}",
+            "manager_id": "={{ $('Config').first().json.manager_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "bc335f5b-53d6-5f6d-8b9a-876442a1f321",
+      "name": "Ask the vision model to read the PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Prepare the vision request').first().json.body) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "OpenRouter bearer"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c2c5c333-0852-5336-92f5-235a03734069",
+      "name": "Validate the fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Stage 2: validate what the vision model returned. Pasted into n8n Code nodes without the module.exports line.\n\nconst INVOICE_STATUSES = ['open', 'paid', 'overdue'];\nconst REQUIRED_INVOICE_FIELDS = ['invoice_no', 'date', 'due_date', 'amount', 'vendor', 'customer_name', 'status'];\n\n// Formatted amounts: the later of \",\" and \".\" is the decimal point; a lone separator followed by exactly\n// three digits is a thousands separator (EUR never has three decimals); repeated separators are thousands.\nfunction toNumber(value) {\n  if (typeof value === 'number') return value;\n  const s = String(value ?? '').replace(/[^\\d.,-]/g, '');\n  if (!/\\d/.test(s)) return NaN;\n  const commas = (s.match(/,/g) || []).length;\n  const dots = (s.match(/\\./g) || []).length;\n  if (commas && dots) {\n    return Number(s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\\./g, '').replace(',', '.') : s.replace(/,/g, ''));\n  }\n  if (!commas && !dots) return Number(s);\n  const separator = commas ? ',' : '.';\n  const digitsAfter = s.length - s.lastIndexOf(separator) - 1;\n  const isThousands = commas + dots > 1 || digitsAfter === 3;\n  return Number(isThousands ? s.split(separator).join('') : s.replace(separator, '.'));\n}\n\nfunction validateFields(obj) {\n  if (!obj || typeof obj !== 'object') throw new Error('expected a JSON object');\n  for (const key of REQUIRED_INVOICE_FIELDS) {\n    if (obj[key] === undefined || obj[key] === null || obj[key] === '') throw new Error(`missing ${key}`);\n  }\n  const amount = toNumber(obj.amount);\n  if (!Number.isFinite(amount)) throw new Error(`amount not numeric: ${obj.amount}`);\n  const status = String(obj.status).trim().toLowerCase();\n  if (!INVOICE_STATUSES.includes(status)) throw new Error(`bad status ${obj.status}`);\n  for (const key of ['date', 'due_date']) {\n    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(obj[key])) throw new Error(`bad ${key} ${obj[key]}`);\n  }\n  return {\n    invoice_no: String(obj.invoice_no),\n    date: obj.date,\n    due_date: obj.due_date,\n    amount,\n    vendor: String(obj.vendor),\n    customer_name: String(obj.customer_name),\n    status,\n    line_items_summary: String(obj.line_items_summary || '').slice(0, 120),\n  };\n}\n\n// Glue for \"Validate the fields\" in 02 Process; validate.js is pasted above it. A throw goes to the error output.\nlet reply;\ntry {\n  reply = JSON.parse($json.choices[0].message.content);\n} catch {\n  throw new Error('vision reply is not bare JSON');\n}\nreturn [{ json: { llm_fields: JSON.stringify(validateFields(reply)) } }];\n"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "ed1b65d1-3380-578b-98f5-191e6b954b5c",
+      "name": "Update the row: stage 2",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoices"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "invoice_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.invoice_id }}"
+            },
+            {
+              "keyName": "customer_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.customer_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.manager_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "stage": "={{ 2 }}",
+            "llm_fields": "={{ $('Validate the fields').first().json.llm_fields }}",
+            "error": "={{ '' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "stage",
+              "displayName": "stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_fields",
+              "displayName": "llm_fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d7129f9c-c8ae-53b2-9272-63d17846e9e6",
+      "name": "Show the sharp view",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "03 Rebuild point"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_id": "={{ $('Config').first().json.customer_id }}",
+            "manager_id": "={{ $('Config').first().json.manager_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "f92d546a-9467-5254-b7f3-f1889f35ac1b",
+      "name": "Write the narrative if ready",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "02b Write the narrative"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_id": "={{ $('Config').first().json.customer_id }}",
+            "manager_id": "={{ $('Config').first().json.manager_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "e0d3214d-b86a-5f86-852f-555a51f38596",
+      "name": "Update the row: stage -1",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoices"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "invoice_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.invoice_id }}"
+            },
+            {
+              "keyName": "customer_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.customer_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.manager_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "stage": "={{ -1 }}",
+            "error": "={{ $json.error ? ($json.error.message || JSON.stringify($json.error)) : 'processing failed' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "stage",
+              "displayName": "stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b79379f4-1139-5936-a9d7-e4f0f5e1169e",
+      "name": "Stages",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        -240
+      ],
+      "parameters": {
+        "content": "Stages left to right: received, coarse (regex, wrong on German numbers on purpose), sharp (vision), narrative. Each stage ends in 03 Rebuild point.",
+        "width": 460,
+        "height": 140
+      }
+    },
+    {
+      "id": "506e7a9e-6a02-5759-90ff-a124e51549b6",
+      "name": "Errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        380
+      ],
+      "parameters": {
+        "content": "Errors land in stage -1 and still rebuild. The card stays half-blurry and the demo continues.",
+        "width": 380,
+        "height": 140
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Show the point as received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show the point as received": {
+      "main": [
+        [
+          {
+            "node": "Download the PDF for processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download the PDF for processing": {
+      "main": [
+        [
+          {
+            "node": "Prepare the vision request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update the row: stage -1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare the vision request": {
+      "main": [
+        [
+          {
+            "node": "Pull the text out of the PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update the row: stage -1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull the text out of the PDF": {
+      "main": [
+        [
+          {
+            "node": "Coarse read with regex",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update the row: stage -1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Coarse read with regex": {
+      "main": [
+        [
+          {
+            "node": "Update the row: stage 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update the row: stage 1": {
+      "main": [
+        [
+          {
+            "node": "Show the coarse view",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show the coarse view": {
+      "main": [
+        [
+          {
+            "node": "Ask the vision model to read the PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask the vision model to read the PDF": {
+      "main": [
+        [
+          {
+            "node": "Validate the fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update the row: stage -1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate the fields": {
+      "main": [
+        [
+          {
+            "node": "Update the row: stage 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update the row: stage -1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update the row: stage 2": {
+      "main": [
+        [
+          {
+            "node": "Show the sharp view",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show the sharp view": {
+      "main": [
+        [
+          {
+            "node": "Write the narrative if ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update the row: stage -1": {
+      "main": [
+        [
+          {
+            "node": "Show the sharp view",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "invoice_id": "inv_seed_a",
+          "customer_id": "acme",
+          "manager_id": "m_anna",
+          "sample_url": "https://raw.githubusercontent.com/havenousername/n8n-invoice-memory/main/samples/acme-001.pdf"
+        }
+      }
+    ]
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

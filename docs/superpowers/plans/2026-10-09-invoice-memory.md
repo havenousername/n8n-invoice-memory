@@ -432,141 +432,71 @@ git commit -m "feat(n8n): 03 Rebuild point sub-workflow; point check script"
 ### Task 7: Workflows 01 Ingest, 02 Process, 02b Write the Narrative
 
 **Files:**
-- Create in n8n Cloud: `01 Ingest`, `02 Process`, `02b Write the narrative`
-- Export: `workflows/01-ingest.json`, `workflows/02-process.json`, `workflows/02b-narrative.json`
-- Test: Form submission, then `scripts/check_point.py` polled
+- Create: `workflows/nodes/{format-the-point-id,prepare-the-narrative-snapshot,keep-only-the-narrative,prepare-the-vision-request,coarse-read-with-regex,validate-the-fields,validate-the-submission,decide-the-rows}.js`, `workflows/code/n8n-harness.js`, `workflows/code/{narrative,process,ingest}.test.js`
+- Modify: `scripts/build_workflows.py` (all four workflows), `scripts/test_build_workflows.py`, `samples/gen.py` (manifest `customer_name`)
+- Generated: `workflows/01-ingest.json`, `workflows/02-process.json`, `workflows/02b-narrative.json`
+- In n8n Cloud: credential `OpenRouter bearer` (Header Auth, name `Authorization`, value `Bearer <key>`), then import and bind
+- Test: unit tests, then manual runs and Form submissions polled with `scripts/check_point.py`
 
 **Interfaces:**
-- Consumes: `03 Rebuild point` (inputs `customer_id`, `manager_id`); `resolveUpload`, `coarseRead`, `validateFields` from Task 4; OpenRouter body from Task 3; `samples/manifest.json` file names.
-- Produces: a public Form URL (the QR); `02 Process` inputs `invoice_id`, `customer_id`, `manager_id`, `sample_url` (JSON only); `02b` inputs `customer_id`, `manager_id`.
+- `02b Write the narrative` inputs `customer_id`, `manager_id`; `02 Process` inputs `invoice_id`, `customer_id`, `manager_id`, `sample_url` (JSON only, no binary); `01 Ingest` produces the public Form URL (the QR).
+- Every Code node is pasted sources plus one glue file in `workflows/nodes/`, run in a sandbox by the Node tests through `n8n-harness.js` with stand-ins for `$()`, `$input`, and `this.helpers`.
 
-- [ ] **Step 1: Build `02b Write the narrative`** (sub-workflow, 10 nodes)
+- [x] **Step 1: Generate `02b Write the narrative`** (10 nodes, a chain)
 
-| # | Node | Settings |
-|---|---|---|
-| 1 | When Executed by Another Workflow | Fields: `customer_id`, `manager_id` |
-| 2 | Config | `QDRANT_URL`, `COLLECTION`, `OPENROUTER_MODEL`. Include other input fields: on |
-| 3 | Hash the point id | Crypto SHA256 of `={{ $json.manager_id }}/{{ $json.customer_id }}` → `idhash` |
-| 4 | Format the point id | Code: paste `ids.js` (without `module.exports`); `return [{json:{id:uuidFromHex($json.idhash), ...$('Config').first().json}}];` |
-| 5 | Read the point | HTTP POST to Config Qdrant collection `/points`, body `={{ JSON.stringify({shard_key:$json.manager_id, ids:[$json.id], with_payload:true}) }}`, Header Auth Qdrant |
-| 6 | Prepare the narrative snapshot | Code: `const cfg = $('Config').first().json; const p = $json.result?.[0]?.payload; if (!p || p.manager_id !== cfg.manager_id || p.customer_id !== cfg.customer_id) throw new Error('missing tenant point'); if (p.stage !== 2 || p.pending_count !== 0) return []; return [{json:{payload:p}}];` |
-| 7 | Ask for three sentences | HTTP Request POST `https://openrouter.ai/api/v1/chat/completions`, Header Auth `OpenRouter bearer`, body: see below |
-| 8 | Keep only the narrative | Code: `const c = JSON.parse($json.choices[0].message.content); if (typeof c.narrative !== 'string' || c.narrative.length < 20) throw new Error('bad narrative'); return [{json:{narrative: c.narrative.slice(0,600), at: new Date().toISOString(), revision: $('Prepare the narrative snapshot').first().json.payload.source_revision}}];` |
-| 9 | Save the narrative | Data Table `customers`, Update rows where `customer_id` equals and `manager_id` equals (from Config); set `narrative` from `$json.narrative`, `narrative_at` from `$json.at`, `narrative_revision` from `$json.revision` |
-| 10 | Rebuild the point | Execute Sub-workflow `03 Rebuild point`, wait on, inputs `customer_id`, `manager_id` from Config |
+Trigger, Config (`QDRANT_URL` placeholder, `COLLECTION`, `OPENROUTER_MODEL`), Hash the point id, Format the point id (also builds the Qdrant read body), Read the point, Prepare the narrative snapshot, Ask for three sentences, Keep only the narrative, Save the narrative, Rebuild the point.
 
-Node 7 body (JSON expression):
+Prepare the narrative snapshot stops the run if the point is missing or belongs to another tenant, returns nothing unless the point is sharp (stage 2, none pending), and builds the narrative request with a strict `json_schema` (`json_object` let the model fence its JSON in Task 3). Keep only the narrative rejects non-JSON and anything under 20 characters, cuts at 600, and carries the snapshot's `source_revision`; Save the narrative writes only `narrative`, `narrative_at`, and `narrative_revision`, matched on tenant and customer. A bad narrative stops the run and the point stays at rung 2, by design.
 
-```js
-={{ JSON.stringify({
-  model: $('Config').first().json.OPENROUTER_MODEL, temperature: 0, max_tokens: 300,
-  response_format: { type: 'json_schema', json_schema: { name: 'narrative', strict: true, schema: {
-    type: 'object', additionalProperties: false, required: ['narrative'],
-    properties: { narrative: { type: 'string' } } } } },
-  messages: [
-    { role: 'system', content: 'You write for a manager. Three plain sentences about this customer: what is open, what is overdue, what changed most recently. No bullet points. Return JSON only: {"narrative": "..."}' },
-    { role: 'user', content: 'Aggregates: ' + JSON.stringify((({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}) => ({invoice_count,open_amount,overdue_count,overdue_amount,last_invoice_at}))($json.payload)) + '\nInvoices:\n' + $json.payload.invoices.map(i => `${i.invoice_no} | ${i.date} | ${i.amount} EUR | due ${i.due_date} | ${i.status} | ${i.items}`).join('\n') }
-  ]}) }}
-```
+- [x] **Step 2: Generate `02 Process`** (15 nodes, the cap)
 
-Node 7 settings: Timeout 20000 ms, Retry on fail 1. Node 8 settings: On Error → Stop workflow (a bad narrative leaves the point at rung 2, by design).
+Trigger, Config (`OPENROUTER_MODEL`, `PDF_ENGINE`, `SAMPLES_BASE_URL`), Show the point as received, Download the PDF for processing, Prepare the vision request, Pull the text out of the PDF, Coarse read with regex, Update the row: stage 1, Show the coarse view, Ask the vision model to read the PDF, Validate the fields, Update the row: stage 2, Show the sharp view, Write the narrative if ready, and Update the row: stage -1.
 
-The snapshot revision is captured before the model call and stored with its narrative. Rebuild uses it only if current rows still have the identical revision and every invoice is sharp; a completion timestamp cannot make an old snapshot fresh. Test both a newly arrived invoice and a coarse-to-sharp transition while a narrative is in flight.
+- Prepare the vision request starts with `VISION_REQUEST_TEMPLATE`, generated from `openrouter_check.extraction_body(b"", "", "")`, so n8n sends the exact request the Task 3 gate passed; it fills model, engine, and the PDF, and passes the binary on for text extraction. An n8n expression could not carry this body: nested JSON contains `}}`, which ends a `{{ }}` expression.
+- The download URL must start with `SAMPLES_BASE_URL/`; otherwise it points at a `.invalid` host whose name explains the failure.
+- Download, vision request, text extraction, vision call, and validation each use their error output to reach Update the row: stage -1, which records the message and still rebuilds. A scanned PDF with empty text is valid and continues.
+- Invoice updates match `invoice_id`, `customer_id`, and `manager_id` from Config. Stage 2 clears `error`.
+- The trigger's pinned input processes the seed row `inv_seed_a` with `acme-001.pdf`, so the whole stage pipeline can be run from the editor without the Form.
 
-- [ ] **Step 2: Build `02 Process`** (sub-workflow, 15 nodes, the cap)
+- [x] **Step 3: Generate `01 Ingest`** (14 nodes)
 
-| # | Node | Settings |
-|---|---|---|
-| 1 | When Executed by Another Workflow | Fields: `invoice_id`, `customer_id`, `manager_id`, `sample_url` |
-| 2 | Config | `OPENROUTER_MODEL`, `PDF_ENGINE`. Include other input fields: on |
-| 3 | Show the point as received | Execute Sub-workflow `03 Rebuild point`, wait on, `customer_id`, `manager_id` |
-| 4 | Download the PDF for processing | HTTP Request GET `={{ $('Config').first().json.sample_url }}`, response File, binary `data`; validate URL against Config's sample base and allowlist before requesting |
-| 5 | Read the PDF as base64 | Code: `const item = $input.first(); const buffer = await this.helpers.getBinaryDataBuffer(0, 'data'); return [{json:{b64: buffer.toString('base64')}, binary: item.binary}];` |
-| 6 | Pull the text out of the PDF | Extract from File, operation PDF, binary `data`; empty text is valid |
-| 7 | Coarse read with regex | Code: paste `coarse.js` (without `module.exports`); `const text = $json.text || ''; return [{json:{regex_fields: JSON.stringify(coarseRead(text)), text}}];` |
-| 8 | Update the row: stage 1 | Data Table `invoices`, Update where `invoice_id` equals `={{ $('Config').first().json.invoice_id }}`: `stage` = 1, `regex_fields`, `text` |
-| 9 | Show the coarse view | Execute Sub-workflow `03 Rebuild point` |
-| 10 | Ask the vision model to read the PDF | HTTP Request POST OpenRouter, Header Auth `OpenRouter bearer`, Timeout 30000, Retry 1, On Error: Continue (using error output). Body below |
-| 11 | Validate the fields | Code: paste `validate.js` (without `module.exports`); `const c = JSON.parse($json.choices[0].message.content); return [{json:{llm_fields: JSON.stringify(validateFields(c))}}];` On Error: Continue (using error output) |
-| 12 | Update the row: stage 2 | Data Table `invoices` Update where `invoice_id` equals: `stage` = 2, `llm_fields` |
-| 13 | Update the row: stage -1 | Data Table `invoices` Update where `invoice_id` equals: `stage` = -1, `error` = `={{ $json.error ? ($json.error.message || JSON.stringify($json.error)) : 'vision failed' }}`. Connected from the error outputs of 10 and 11 |
-| 14 | Show the sharp view | Execute Sub-workflow `03 Rebuild point`. Connected from 12 and from 13 |
-| 15 | Write the narrative if ready | Execute Sub-workflow `02b Write the narrative`, wait on, mapping tenant and customer from Config; 02b's snapshot gate returns no items unless every invoice is sharp |
+Pick an invoice (Form: `Invoice` dropdown of the 14 manifest files, `Worker` dropdown Tom, Lena, Jules, Mia), Config (`SAMPLES_BASE_URL`, `SAMPLES` allowlist, `CUSTOMER_NAMES`, `WORKERS`), Validate the submission, Download the chosen sample, Hash the PDF, Seen this hash before?, Is it a duplicate?, Say it is a duplicate, Load the existing customer, Decide the rows, Upsert the customer row, Append the invoice row, Process in the background (wait off), Say it was received.
 
-Node 10 body (JSON expression):
+- Validation runs before any download: the sample must be on the manifest allowlist and the worker known; it resolves tenant, customer, display name, `invoice_id`, `sample_url`, and `received_at`.
+- The duplicate lookup matches `pdf_hash`, `customer_id`, and `manager_id`, and a duplicate is a row with an `invoice_id`.
+- Decide the rows keeps the first worker and the existing name of a known customer; the invoice row records who submitted it. The upsert writes only `customer_id`, `manager_id`, `worker_id`, and `name`, so narrative and `deleted_at` survive.
+- Deviations from the earlier draft: display names come from the manifest (`Acme GmbH`, as printed on the PDF); the disabled Google Drive node is a sticky note instead, since a disabled node still demands a Google credential on import.
 
-```js
-={{ JSON.stringify({
-  model: $('Config').first().json.OPENROUTER_MODEL, temperature: 0, max_tokens: 400,
-  response_format: { type: 'json_schema', json_schema: { name: 'invoice', strict: true, schema: {
-    type: 'object', additionalProperties: false,
-    required: ['invoice_no', 'date', 'due_date', 'amount', 'vendor', 'customer_name', 'status', 'line_items_summary'],
-    properties: {
-      invoice_no: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD' },
-      due_date: { type: 'string', description: 'YYYY-MM-DD' }, amount: { type: 'number', description: 'total in EUR' },
-      vendor: { type: 'string' }, customer_name: { type: 'string' },
-      status: { type: 'string', enum: ['open', 'paid', 'overdue'] },
-      line_items_summary: { type: 'string', description: 'max 12 words' } } } } },
-  plugins: [{ id: 'file-parser', pdf: { engine: $('Config').first().json.PDF_ENGINE } }],
-  messages: [
-    { role: 'system', content: 'You read one invoice PDF and return JSON only with keys: invoice_no, date (YYYY-MM-DD), due_date (YYYY-MM-DD), amount (number in EUR, no thousands separators), vendor, customer_name, status (one of: open, paid, overdue), line_items_summary (max 12 words).' },
-    { role: 'user', content: [
-      { type: 'text', text: 'Extract the fields.' },
-      { type: 'file', file: { filename: 'invoice.pdf', file_data: 'data:application/pdf;base64,' + $('Read the PDF as base64').first().json.b64 } }
-    ]}
-  ]}) }}
-```
+- [ ] **Step 4: Import and bind** (n8n Cloud)
 
-Sticky notes (two): "Stages top to bottom: received → coarse (regex, on purpose wrong on German numbers) → sharp (vision) → narrative. Each stage ends in Rebuild." and "Errors land in stage -1 and still rebuild. The card stays half-blurry, the demo continues."
+Create the `OpenRouter bearer` credential. Import `02b-narrative.json`, `02-process.json`, and `01-ingest.json` (03 is already imported and unchanged). In each, select the credentials on HTTP nodes, set `QDRANT_URL` in 02b's Config, and select the target workflow in every Execute Sub-workflow node (the node's subtitle names it); check that each one's input mapping survived the selection. Save all three; activate `01 Ingest`.
 
-Renumber the original rows 7 through 13 as 8 through 14 after inserting the download and extraction steps; there are 15 actual nodes including the final narrative call. All Rebuild and invoice update inputs reference Config explicitly, with tenant and customer conditions on invoice updates. Route download, encoding, and extraction error outputs to `Update the row: stage -1` as well. Persist errors as terminal failures, not pending; use separate successful stage-2 output data to avoid reading an unexecuted node. Do not add an IF based on another node's execution flag.
+- [ ] **Step 5: Run the pipeline without the Form**
 
-- [ ] **Step 3: Build `01 Ingest`** (12 nodes)
+Open `02 Process` and execute it with its pinned input.
+Run: `python3 scripts/check_point.py m_anna acme --show stage,pending_count,latest.amount,summary_stage`
+Expected: `stage=2 pending_count=0 latest.amount=12300 summary_stage=3`, so 02, 02b, and 03 all worked.
 
-| # | Node | Settings |
-|---|---|---|
-| 1 | Pick an invoice | Form Trigger. Title "Send an invoice (synthetic data only)". Fields: `sample` dropdown with the 14 file names from `samples/manifest.json`; `worker` dropdown `w_tom`, `w_lena`, `w_jules`, `w_mia`. Respond: Using Form node |
-| 2 | Config | `QDRANT_URL`, `COLLECTION`, `SAMPLES_BASE_URL` = `https://raw.githubusercontent.com/<org>/n8n-invoice-memory/main/samples`, `WORKERS` = `{"w_tom":{"manager_id":"m_anna","name":"Tom"},"w_lena":{"manager_id":"m_anna","name":"Lena"},"w_jules":{"manager_id":"m_ben","name":"Jules"},"w_mia":{"manager_id":"m_ben","name":"Mia"}}`, `MANAGERS` = `{"m_anna":"Anna","m_ben":"Ben"}`. Include other input fields: on |
-| 3 | Download the chosen sample | HTTP Request GET `={{ $json.SAMPLES_BASE_URL }}/{{ $json.sample }}`, Response format: File, output binary `data` |
-| 4 | Hash the PDF | Crypto, Hash SHA256, Binary File: on, binary property `data`, property name `pdf_hash` |
-| 5 | Seen this hash before? | Data Table `invoices` Get where `pdf_hash` equals `={{ $json.pdf_hash }}`. Always output data: on |
-| 6 | Is it a duplicate? | If: `={{ !!$json.invoice_id }}` |
-| 7 | Say it is a duplicate | Form (Form Ending). Completion title "Duplicate", message `=That's {{ $('Seen this hash before?').first().json.filename }} again (hash match). Nothing ingested.` |
-| 8 | Resolve the customer and manager | Code: paste `ids.js` (without `module.exports`); `const cfg = $('Config').first().json; const r = resolveUpload(cfg.sample, cfg.worker, JSON.parse(cfg.WORKERS)); const id = 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); return [{json:{...r, invoice_id: id, sample_url: cfg.SAMPLES_BASE_URL + '/' + cfg.sample, filename: cfg.sample, pdf_hash: $('Hash the PDF').first().json.pdf_hash, received_at: new Date().toISOString().replace(/\.\d{3}Z$/,'Z')}}];` |
-| 9 | Upsert the customer row | Data Table `customers`, Insert or Update (match on `customer_id` and `manager_id`): `worker_id`, `name` = `={{ $json.customer_id.charAt(0).toUpperCase() + $json.customer_id.slice(1) }}` only on insert if the node supports it, otherwise set it every time |
-| 10 | Append the invoice row | Data Table `invoices`, Insert: `invoice_id` = invoice_id, `customer_id`, `worker_id`, `manager_id`, `pdf_hash`, `filename`, `stage` = 0, `text` = '', `regex_fields` = '{}', `llm_fields` = '{}', `error` = '', `received_at` |
-| 11 | Process in the background | Execute Sub-workflow `02 Process`, **Wait for Sub-Workflow Completion: off**, inputs `invoice_id`, `customer_id`, `manager_id`, `sample_url` from `Resolve the customer and manager`; no binary input |
-| 12 | Say it was received | Form (Form Ending). Title "Received", message "Watch the dashboard. Rough in two seconds, sharp in thirty." |
+- [ ] **Step 6: Test the Form happy path**
 
-Connections: 6 true → 7; 6 false → 8 → 9 → 10 → 11 → 12. Add a 13th node after 10, **disabled**: Google Drive, Upload file, binary `data`, named `Keep the PDF for accounting retention`, with its own sticky "Disabled. Swap for your storage. The PDF outlives a GDPR removal of the searchable record." Sticky on the Form: "No file field on purpose. Samples download from the repo. To accept uploads, add a File field and delete node 3."
-
-Before downloading, validate sample and worker and resolve the tenant. Scope duplicate lookup to `pdf_hash` AND `manager_id` AND `customer_id`, deriving tenant/customer from validated Config rather than a Data Table result. Duplicate means a matching `invoice_id`, not built-in row `id`. Add a validation Code node after Config (14 nodes including the disabled storage example), then renumber. All customer and invoice mappings after Data Table nodes explicitly reference `Resolve the customer and manager`; preserve existing customer narrative, deletion state, and display name. Customer ownership stays with the first worker for this booth corpus. Null is the empty dateTime value, never an empty string. The disabled storage example must reattach the original download binary before enabling it.
-
-- [ ] **Step 4: Test the happy path**
-
-Activate `01 Ingest`. Open the Form URL. Pick `acme-001.pdf`, worker `w_tom`, submit. Note the time.
-
-Run every 5 s for up to 60 s:
-`python3 scripts/check_point.py m_anna acme --show stage,pending_count,latest.amount,summary_stage`
+Delete the seed invoice rows `inv_seed_a` and `inv_seed_b` from `invoices`. Open the Form URL, pick `acme-001.pdf` and worker Tom, submit. Poll every 5 s for up to 60 s with the command from Step 5.
 Expected sequence: `stage=0 pending_count=1 latest.amount=null summary_stage=1` within 3 s → `stage=1 pending_count=1 latest.amount=12.3 summary_stage=1` within 6 s → `stage=2 pending_count=0 latest.amount=12300 summary_stage=1` within 40 s → `summary_stage=3` a few seconds later. The amount flips from 12.3 to 12300 (the booth moment).
 
-- [ ] **Step 5: Test the duplicate path**
+- [ ] **Step 7: Test the duplicate path**
 
-Submit `beta-003.pdf` with `w_tom`, wait 40 s, then submit `beta-004.pdf` with `w_tom`.
+Submit `beta-003.pdf` with Tom, wait 40 s, then submit `beta-004.pdf` with Tom.
 Expected: the second submission ends on the "Duplicate" page naming `beta-003.pdf`; `python3 scripts/check_point.py m_anna beta --expect invoice_count=1` prints `ok`.
 
-- [ ] **Step 6: Test the error path**
+- [ ] **Step 8: Test the error path**
 
-Temporarily set `Config.OPENROUTER_MODEL` in `02 Process` to `nonexistent/model`, submit `gamma-001.pdf` with `w_lena`.
-Expected within 20 s: `python3 scripts/check_point.py m_anna gamma --show stage,invoices.0.error` prints `stage=1` and a non-empty error; the execution list shows `02 Process` finished, not crashed. Restore the model. Delete the gamma rows from both Data Tables and rerun `gamma-001.pdf` so the corpus is clean.
+Temporarily set `OPENROUTER_MODEL` in `02 Process` Config to `nonexistent/model`, submit `gamma-001.pdf` with Lena.
+Expected within 20 s: `python3 scripts/check_point.py m_anna gamma --show stage,invoices.0.error` prints `stage=1` and a non-empty error; the execution list shows `02 Process` finished, not crashed. Restore the model, delete the gamma rows from both Data Tables, and resubmit `gamma-001.pdf` so the corpus is clean.
 
-- [ ] **Step 7: Export, scrub, commit**
-
-Export the three workflows, scrub as in Task 6 (no credential ids, `Config` URLs set to placeholders, trigger test data pinned).
+- [x] **Step 9: Commit**
 
 ```bash
-git add workflows/01-ingest.json workflows/02-process.json workflows/02b-narrative.json
-git commit -m "feat(n8n): ingest, staged processing, and narrative workflows"
+git add scripts samples workflows docs
+git commit -m "feat(n8n): ingest, staged processing, and narrative workflows as generated JSON"
 ```
 
 ---

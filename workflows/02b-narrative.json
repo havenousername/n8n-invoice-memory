@@ -1,0 +1,437 @@
+{
+  "name": "02b Write the narrative",
+  "nodes": [
+    {
+      "id": "b9c7d9b1-d227-5b57-83a5-49a5014d5992",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "customer_id",
+              "type": "string"
+            },
+            {
+              "name": "manager_id",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "167e5169-39fb-59d5-9c0c-10b9585268e1",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d3540528-eae9-5af1-8589-11791531525f",
+              "name": "QDRANT_URL",
+              "value": "https://REPLACE.cloud.qdrant.io:6333",
+              "type": "string"
+            },
+            {
+              "id": "dabcd837-73e5-5c5a-994e-bc4e3fec5ebb",
+              "name": "COLLECTION",
+              "value": "customers",
+              "type": "string"
+            },
+            {
+              "id": "d68687d3-1a9c-5e9c-8b9e-8fbb542f598d",
+              "name": "OPENROUTER_MODEL",
+              "value": "anthropic/claude-haiku-5.5",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "974019d6-a7ed-5c6b-a926-3601d4156792",
+      "name": "Hash the point id",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "value": "={{ $json.manager_id }}/{{ $json.customer_id }}",
+        "dataPropertyName": "idhash",
+        "encoding": "hex"
+      }
+    },
+    {
+      "id": "b520a71f-67eb-5660-b3c1-2768d6150a93",
+      "name": "Format the point id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Point ids and upload identity. Pasted into n8n Code nodes without the module.exports line.\n\nfunction uuidFromHex(hex) {\n  if (typeof hex !== 'string' || !/^[0-9a-f]{32,}$/i.test(hex)) {\n    throw new Error(`expected a sha-256 hex digest, got ${hex}`);\n  }\n  const h = hex.toLowerCase();\n  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;\n}\n\nfunction resolveUpload(sampleFile, workerId, workers) {\n  const slug = String(sampleFile).replace(/\\.pdf$/i, '').split('-')[0].toLowerCase();\n  if (!slug) throw new Error(`no customer slug in ${sampleFile}`);\n  if (!Object.hasOwn(workers, workerId)) throw new Error(`unknown worker ${workerId}`);\n  return { customer_id: slug, worker_id: workerId, manager_id: workers[workerId].manager_id };\n}\n\n// Glue for \"Format the point id\" in 02b Write the narrative; ids.js is pasted above it.\nconst cfg = $('Config').first().json;\nconst id = uuidFromHex($json.idhash);\nreturn [{ json: { id, body: { shard_key: cfg.manager_id, ids: [id], with_payload: true } } }];\n"
+      }
+    },
+    {
+      "id": "1e685ef4-b7c6-5566-aeea-92eb010f9eab",
+      "name": "Read the point",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.QDRANT_URL }}/collections/{{ $('Config').first().json.COLLECTION }}/points",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Qdrant api-key"
+        }
+      }
+    },
+    {
+      "id": "9abab9f3-88e0-5164-8a7c-eead08e146ce",
+      "name": "Prepare the narrative snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Glue for \"Prepare the narrative snapshot\" in 02b Write the narrative.\n// Only a sharp point is narrated: every invoice read by the vision stage, none pending. The payload travels on,\n// so the narrative is saved with the source_revision it was written from and goes stale if the rows change.\nconst cfg = $('Config').first().json;\nconst payload = (($json.result || [])[0] || {}).payload;\nif (!payload || payload.manager_id !== cfg.manager_id || payload.customer_id !== cfg.customer_id) {\n  throw new Error(`missing tenant point for ${cfg.manager_id}/${cfg.customer_id}`);\n}\nif (payload.stage !== 2 || payload.pending_count !== 0) return [];\nconst { invoice_count, open_amount, overdue_count, overdue_amount, last_invoice_at } = payload;\nconst aggregates = { invoice_count, open_amount, overdue_count, overdue_amount, last_invoice_at };\nconst lines = payload.invoices.map((i) => `${i.invoice_no} | ${i.date} | ${i.amount} EUR | due ${i.due_date} | ${i.status} | ${i.items}`);\nconst body = {\n  model: cfg.OPENROUTER_MODEL,\n  temperature: 0,\n  max_tokens: 300,\n  response_format: { type: 'json_schema', json_schema: { name: 'narrative', strict: true, schema: {\n    type: 'object', additionalProperties: false, required: ['narrative'], properties: { narrative: { type: 'string' } },\n  } } },\n  messages: [\n    { role: 'system', content: 'You write for a manager. Three plain sentences about this customer: what is open, what is overdue, what changed most recently. No bullet points.' },\n    { role: 'user', content: `Aggregates: ${JSON.stringify(aggregates)}\\nInvoices:\\n${lines.join('\\n')}` },\n  ],\n};\nreturn [{ json: { payload, body } }];\n"
+      }
+    },
+    {
+      "id": "60d4cc18-f2f7-5a0e-918d-d8f979ce0e2f",
+      "name": "Ask for three sentences",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "OpenRouter bearer"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "24bd388d-4255-510b-8800-d2fc73296411",
+      "name": "Keep only the narrative",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Glue for \"Keep only the narrative\" in 02b Write the narrative. A bad reply stops the run: the point stays at rung 2.\nlet reply;\ntry {\n  reply = JSON.parse($json.choices[0].message.content);\n} catch {\n  throw new Error('narrative reply is not bare JSON');\n}\nif (!reply || typeof reply.narrative !== 'string' || reply.narrative.length < 20) throw new Error('bad narrative');\nconst revision = $('Prepare the narrative snapshot').first().json.payload.source_revision;\nconst at = new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\nreturn [{ json: { narrative: reply.narrative.slice(0, 600), at, revision } }];\n"
+      }
+    },
+    {
+      "id": "8cc704d6-b8d8-521b-a7de-93c628d75bd7",
+      "name": "Save the narrative",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "customers"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "customer_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.customer_id }}"
+            },
+            {
+              "keyName": "manager_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Config').first().json.manager_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "narrative": "={{ $('Keep only the narrative').first().json.narrative }}",
+            "narrative_at": "={{ $('Keep only the narrative').first().json.at }}",
+            "narrative_revision": "={{ $('Keep only the narrative').first().json.revision }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "narrative",
+              "displayName": "narrative",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "narrative_at",
+              "displayName": "narrative_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "narrative_revision",
+              "displayName": "narrative_revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "53b9097e-2a68-55f4-9cf0-da8dfc3382fa",
+      "name": "Rebuild the point",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "03 Rebuild point"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_id": "={{ $('Config').first().json.customer_id }}",
+            "manager_id": "={{ $('Config').first().json.manager_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "manager_id",
+              "displayName": "manager_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "0596c660-3bb4-5fac-84e3-e1be38c1b5be",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -220
+      ],
+      "parameters": {
+        "content": "Narrates only a sharp point: every invoice read, none pending. The narrative is saved with the source_revision it describes and goes stale when the rows change.",
+        "width": 380,
+        "height": 140
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Hash the point id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash the point id": {
+      "main": [
+        [
+          {
+            "node": "Format the point id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format the point id": {
+      "main": [
+        [
+          {
+            "node": "Read the point",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the point": {
+      "main": [
+        [
+          {
+            "node": "Prepare the narrative snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare the narrative snapshot": {
+      "main": [
+        [
+          {
+            "node": "Ask for three sentences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask for three sentences": {
+      "main": [
+        [
+          {
+            "node": "Keep only the narrative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep only the narrative": {
+      "main": [
+        [
+          {
+            "node": "Save the narrative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save the narrative": {
+      "main": [
+        [
+          {
+            "node": "Rebuild the point",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "customer_id": "acme",
+          "manager_id": "m_anna"
+        }
+      }
+    ]
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
