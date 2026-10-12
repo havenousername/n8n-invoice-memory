@@ -1,0 +1,18 @@
+Q8nten GmbH
+
+GUTSCHRIFT
+Belegnummer: CN-4101
+Version: 1
+Datum: 09.10.2026
+Kostenstelle: CC-PAR-01
+Standort: Paris
+Lieferant: Atelier Cloud SAS
+Kategorie: Cloud-Infrastruktur
+Beschreibung: Gutschrift für den Ausfall im September
+
+Betrag: 4.800,00 €
+Eingereicht von: Jules
+
+Synthetischer Beleg für eine Demo. Keine echte Firma, keine echte Forderung.
+
+

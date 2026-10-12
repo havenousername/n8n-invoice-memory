@@ -1,0 +1,18 @@
+Q8nten GmbH
+
+BESTELLUNG
+Belegnummer: PO-1042
+Version: 2 (ersetzt Version 1)
+Datum: 13.10.2026
+Kostenstelle: CC-BER-01
+Standort: Berlin
+Lieferant: Rechenwerk Systems GmbH
+Kategorie: GPU-Rechenleistung
+Beschreibung: GPU-Server (11x) für den Inferenz-Launch, Auftrag erweitert
+
+Betrag: 132.000,00 €
+Eingereicht von: Tom
+
+Synthetischer Beleg für eine Demo. Keine echte Firma, keine echte Forderung.
+
+
