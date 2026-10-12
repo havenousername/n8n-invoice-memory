@@ -362,7 +362,7 @@ git commit -m "feat(samples): 14 synthetic invoice PDFs, two in German number fo
 
 **Interfaces:**
 - Consumes: `computeView`, `uuidFromHex` from Task 4 (pasted).
-- Produces: sub-workflow `03 Rebuild point` with inputs `customer_id` (string), `manager_id` (string); on completion the Qdrant point for that customer reflects the Data Tables. Every later workflow calls it with exactly those two inputs.
+- Produces: sub-workflow `03 Rebuild point`. Its trigger accepts the caller's item, which must carry `customer_id` and `manager_id` (the trigger's note says so); on completion the Qdrant point reflects the Data Tables and the workflow returns `{customer_id, manager_id, point_id}`, so a caller can chain another sub-workflow call. See Task 7 for why no sub-workflow declares inputs.
 
 - [x] **Step 1: Create the Data Tables in the n8n project** (UI, Data tables tab)
 
@@ -439,7 +439,9 @@ git commit -m "feat(n8n): 03 Rebuild point sub-workflow; point check script"
 - Test: unit tests, then manual runs and Form submissions polled with `scripts/check_point.py`
 
 **Interfaces:**
-- `02b Write the narrative` inputs `customer_id`, `manager_id`; `02 Process` inputs `invoice_id`, `customer_id`, `manager_id`, `sample_url` (JSON only, no binary); `01 Ingest` produces the public Form URL (the QR).
+- Sub-workflow contract: every sub-workflow trigger accepts the caller's item (`inputSource: passthrough`) and states what the item must carry in a note under the trigger. `02b` needs `customer_id` and `manager_id`; `02` needs the invoice row 01 appended (`invoice_id`, `filename`, `customer_id`, `manager_id`; JSON only, no binary). Every Execute Sub-workflow node is placed right after a node whose output carries those fields: Config, a Data Table write (writes return the rows), or `03`, which returns its ids. A Python test enforces that placement.
+- Why no declared inputs: a declared-input trigger makes the caller carry an input mapping, and the n8n editor resets that mapping to empty values when the target workflow is selected after import. n8n then merges the empty values over the caller's item, so `03` received `customer_id` and `manager_id` as null (first live run, 2026-10-12). With no mapping there is nothing to reset; selecting the target is the only binding.
+- `01 Ingest` produces the public Form URL (the QR).
 - Every Code node is pasted sources plus one glue file in `workflows/nodes/`, run in a sandbox by the Node tests through `n8n-harness.js` with stand-ins for `$()`, `$input`, and `this.helpers`.
 
 - [x] **Step 1: Generate `02b Write the narrative`** (10 nodes, a chain)
@@ -453,10 +455,10 @@ Prepare the narrative snapshot stops the run if the point is missing or belongs 
 Trigger, Config (`OPENROUTER_MODEL`, `PDF_ENGINE`, `SAMPLES_BASE_URL`), Show the point as received, Download the PDF for processing, Prepare the vision request, Pull the text out of the PDF, Coarse read with regex, Update the row: stage 1, Show the coarse view, Ask the vision model to read the PDF, Validate the fields, Update the row: stage 2, Show the sharp view, Write the narrative if ready, and Update the row: stage -1.
 
 - Prepare the vision request starts with `VISION_REQUEST_TEMPLATE`, generated from `openrouter_check.extraction_body(b"", "", "")`, so n8n sends the exact request the Task 3 gate passed; it fills model, engine, and the PDF, and passes the binary on for text extraction. An n8n expression could not carry this body: nested JSON contains `}}`, which ends a `{{ }}` expression.
-- The download URL must start with `SAMPLES_BASE_URL/`; otherwise it points at a `.invalid` host whose name explains the failure.
+- The download URL is `SAMPLES_BASE_URL/` plus the URL-encoded `filename` from the invoice row, so 02 can only download from the sample folder; 01 validated the file name against the manifest.
 - Download, vision request, text extraction, vision call, and validation each use their error output to reach Update the row: stage -1, which records the message and still rebuilds. A scanned PDF with empty text is valid and continues.
 - Invoice updates match `invoice_id`, `customer_id`, and `manager_id` from Config. Stage 2 clears `error`.
-- The trigger's pinned input processes the seed row `inv_seed_a` with `acme-001.pdf`, so the whole stage pipeline can be run from the editor without the Form.
+- The trigger's pinned input (`inv_seed_a`, `acme`, `m_anna`, `acme-001.pdf`) processes the seed row with a real sample, so the whole stage pipeline can be run from the editor without the Form.
 
 - [x] **Step 3: Generate `01 Ingest`** (14 nodes)
 
@@ -469,7 +471,7 @@ Pick an invoice (Form: `Invoice` dropdown of the 14 manifest files, `Worker` dro
 
 - [ ] **Step 4: Import and bind** (n8n Cloud)
 
-Create the `OpenRouter bearer` credential. Import `02b-narrative.json`, `02-process.json`, and `01-ingest.json` (03 is already imported and unchanged). In each, select the credentials on HTTP nodes, set `QDRANT_URL` in 02b's Config, and select the target workflow in every Execute Sub-workflow node (the node's subtitle names it); check that each one's input mapping survived the selection. Save all three; activate `01 Ingest`.
+Create the `OpenRouter bearer` credential. Delete any earlier imports of these workflows, then import `03-rebuild-point.json`, `02b-narrative.json`, `02-process.json`, and `01-ingest.json`, in that order. In each, select the credentials on HTTP nodes, set `QDRANT_URL` in the Config of 03 and 02b, and select the target workflow in every Execute Sub-workflow node (its subtitle names it); there is no input mapping to fill. Save all four; activate `01 Ingest`.
 
 - [ ] **Step 5: Run the pipeline without the Form**
 

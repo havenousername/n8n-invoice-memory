@@ -3,7 +3,8 @@
 Run after changing either folder or samples/manifest.json: python3 scripts/build_workflows.py
 The output carries no instance ids. Data Tables and credentials are referenced by name, the cluster URL is a
 placeholder to set in each Config node, and every Execute Sub-workflow node names its target in
-`cachedResultName` so it can be selected again after import.
+`cachedResultName` so it can be selected after import. Sub-workflows accept the caller's item as is, and each call
+site passes an item that already carries customer_id and manager_id, so there is no input mapping to rebind.
 """
 
 import dataclasses
@@ -113,7 +114,8 @@ def rebuild_point(parts: Parts) -> dict:
     """03 Rebuild point: the only writer to Qdrant. Inputs customer_id and manager_id."""
     c = _Canvas(REBUILD)
     steps = [
-        c.add(_TRIGGER, (0, 0), _trigger("customer_id", "manager_id")),
+        c.add(_TRIGGER, (0, 0), _trigger(), **_contract(
+            "Expects customer_id and manager_id on the incoming item. Returns them with the point id.")),
         c.add("Config", (1, 0), _config(REBUILD, QDRANT_URL=QDRANT_URL_PLACEHOLDER, COLLECTION="customers")),
         c.add("Hash the point id", (2, 0), _hash_text("={{ $json.manager_id }}/{{ $json.customer_id }}", "idhash")),
         c.add("Load the customer row", (3, 0), _rows("customers", _tenant_from("Config")), alwaysOutputData=True, executeOnce=True),
@@ -121,6 +123,10 @@ def rebuild_point(parts: Parts) -> dict:
         c.add("Compute the view", (5, 0), _code(parts, "compute-the-view", "ids", "view")),
         c.add("Upsert the point with inference", (6, 0), _http(
             "PUT", _qdrant_url("/points?wait=true"), "={{ JSON.stringify($json.body) }}"), credentials=dict(QDRANT_CREDENTIAL)),
+        c.add("Return what was rebuilt", (7, 0), _set(REBUILD, "Return what was rebuilt", include_other=False,
+                                                      customer_id=ref("Config", "customer_id"),
+                                                      manager_id=ref("Config", "manager_id"),
+                                                      point_id=ref("Compute the view", "body.points[0].id"))),
     ]
     c.chain(*steps)
     c.note("Sticky Note", (440, -220), "Source of truth is the two Data Tables. This workflow is the only writer to Qdrant. "
@@ -132,7 +138,7 @@ def narrative(parts: Parts) -> dict:
     """02b Write the narrative: three sentences for a sharp point, saved with the revision they describe."""
     c = _Canvas(NARRATIVE)
     steps = [
-        c.add(_TRIGGER, (0, 0), _trigger("customer_id", "manager_id")),
+        c.add(_TRIGGER, (0, 0), _trigger(), **_contract("Expects customer_id and manager_id on the incoming item.")),
         c.add("Config", (1, 0), _config(NARRATIVE, QDRANT_URL=QDRANT_URL_PLACEHOLDER, COLLECTION="customers",
                                         OPENROUTER_MODEL=DEFAULT_MODEL)),
         c.add("Hash the point id", (2, 0), _hash_text("={{ $json.manager_id }}/{{ $json.customer_id }}", "idhash")),
@@ -148,7 +154,7 @@ def narrative(parts: Parts) -> dict:
             "narrative_at": ref("Keep only the narrative", "at"),
             "narrative_revision": ref("Keep only the narrative", "revision"),
         })),
-        c.add("Rebuild the point", (9, 0), _execute(REBUILD, _tenant_from("Config"))),
+        c.add("Rebuild the point", (9, 0), _execute(REBUILD)),
     ]
     c.chain(*steps)
     c.note("Sticky Note", (1100, -220), "Narrates only a sharp point: every invoice read, none pending. The narrative is "
@@ -162,15 +168,16 @@ def process(parts: Parts) -> dict:
     tenant = _tenant_from("Config")
     invoice = {"invoice_id": ref("Config", "invoice_id"), **tenant}
     vision_template = f"const VISION_REQUEST_TEMPLATE = {json.dumps(extraction_body(b'', '', ''))};\n"
-    sample_url = ("={{ $('Config').first().json.sample_url.startsWith($('Config').first().json.SAMPLES_BASE_URL + '/') "
-                  "? $('Config').first().json.sample_url : 'https://sample-url-outside-SAMPLES_BASE_URL.invalid' }}")
+    download_url = ("={{ $('Config').first().json.SAMPLES_BASE_URL }}/"
+                  "{{ encodeURIComponent($('Config').first().json.filename) }}")
     failed = "Update the row: stage -1"
     happy = [
-        c.add(_TRIGGER, (0, 0), _trigger("invoice_id", "customer_id", "manager_id", "sample_url")),
+        c.add(_TRIGGER, (0, 0), _trigger(), **_contract(
+            "Expects the invoice row 01 Ingest appended: invoice_id and filename, plus customer_id and manager_id.")),
         c.add("Config", (1, 0), _config(PROCESS, OPENROUTER_MODEL=DEFAULT_MODEL, PDF_ENGINE="native",
                                         SAMPLES_BASE_URL=SAMPLES_BASE_URL)),
-        c.add("Show the point as received", (2, 0), _execute(REBUILD, tenant)),
-        c.add("Download the PDF for processing", (3, 0), _http("GET", sample_url, file_response=True), onError="continueErrorOutput"),
+        c.add("Show the point as received", (2, 0), _execute(REBUILD)),
+        c.add("Download the PDF for processing", (3, 0), _http("GET", download_url, file_response=True), onError="continueErrorOutput"),
         c.add("Prepare the vision request", (4, 0), _code(parts, "prepare-the-vision-request", prefix=vision_template),
               onError="continueErrorOutput"),
         c.add("Pull the text out of the PDF", (5, 0), ("n8n-nodes-base.extractFromFile", 1,
@@ -181,7 +188,7 @@ def process(parts: Parts) -> dict:
             "regex_fields": ref("Coarse read with regex", "regex_fields"),
             "text": ref("Coarse read with regex", "text"),
         })),
-        c.add("Show the coarse view", (8, 0), _execute(REBUILD, tenant)),
+        c.add("Show the coarse view", (8, 0), _execute(REBUILD)),
         c.add("Ask the vision model to read the PDF", (9, 0), _http(
             "POST", OPENROUTER_URL, "={{ JSON.stringify($('Prepare the vision request').first().json.body) }}", timeout=30000),
             credentials=dict(OPENROUTER_CREDENTIAL), retryOnFail=True, maxTries=2, waitBetweenTries=2000,
@@ -190,8 +197,8 @@ def process(parts: Parts) -> dict:
         c.add("Update the row: stage 2", (11, 0), _write("update", "invoices", invoice, {
             "stage": "={{ 2 }}", "llm_fields": ref("Validate the fields", "llm_fields"), "error": "={{ '' }}",
         })),
-        c.add("Show the sharp view", (12, 0), _execute(REBUILD, tenant)),
-        c.add("Write the narrative if ready", (13, 0), _execute(NARRATIVE, tenant)),
+        c.add("Show the sharp view", (12, 0), _execute(REBUILD)),
+        c.add("Write the narrative if ready", (13, 0), _execute(NARRATIVE)),
     ]
     c.add(failed, (11, 1), _write("update", "invoices", invoice, {
         "stage": "={{ -1 }}",
@@ -206,8 +213,7 @@ def process(parts: Parts) -> dict:
                                   "sharp (vision), narrative. Each stage ends in 03 Rebuild point.", width=460)
     c.note("Errors", (2200, 380), "Errors land in stage -1 and still rebuild. The card stays half-blurry and the demo "
                                   "continues.")
-    pin = {"invoice_id": "inv_seed_a", "customer_id": "acme", "manager_id": "m_anna",
-           "sample_url": f"{SAMPLES_BASE_URL}/acme-001.pdf"}
+    pin = {"invoice_id": "inv_seed_a", "customer_id": "acme", "manager_id": "m_anna", "filename": "acme-001.pdf"}
     return c.build({_TRIGGER: [{"json": pin}]})
 
 
@@ -244,10 +250,7 @@ def ingest(parts: Parts) -> dict:
             "customer_id": customer["customer_id"], "manager_id": customer["manager_id"]}, customer)),
         c.add("Append the invoice row", (10, 1), _write("insert", "invoices", None, {
             key: ref("Decide the rows", f"invoice.{key}") for key in invoice_columns})),
-        c.add("Process in the background", (11, 1), _execute(PROCESS, {
-            **{key: ref("Decide the rows", f"invoice.{key}") for key in ("invoice_id", "customer_id", "manager_id")},
-            "sample_url": ref(validated, "sample_url"),
-        }, wait=False)),
+        c.add("Process in the background", (11, 1), _execute(PROCESS, wait=False)),
         c.add("Say it was received", (12, 1), _form_ending(
             "Received", "Watch the dashboard. Rough in two seconds, sharp in thirty."),
               webhookId=_stable_id(INGEST, "Say it was received/webhook")),
@@ -278,19 +281,28 @@ def build_all(parts: Parts) -> dict[str, dict]:
 
 # Node specs: (type, typeVersion, parameters). Parameter names checked against n8n's source.
 
-def _trigger(*inputs: str) -> tuple:
-    return ("n8n-nodes-base.executeWorkflowTrigger", 1.1, {
-        "inputSource": "workflowInputs",
-        "workflowInputs": {"values": [{"name": name, "type": "string"} for name in inputs]},
-    })
+def _trigger() -> tuple:
+    """Accept all data. A declared-input trigger makes the caller carry an input mapping, and the editor resets that
+    mapping to empty values when the target workflow is selected after import, so the ids arrived as null."""
+    return ("n8n-nodes-base.executeWorkflowTrigger", 1.1, {"inputSource": "passthrough"})
+
+
+def _contract(text: str) -> dict:
+    """The sub-workflow's input contract, shown under its trigger on the canvas."""
+    return {"notes": text, "notesInFlow": True}
 
 
 def _config(workflow: str, **values: str) -> tuple:
+    return _set(workflow, "Config", include_other=True, **values)
+
+
+def _set(workflow: str, node: str, include_other: bool, **values: str) -> tuple:
     assignments = [
-        {"id": str(uuid.uuid5(_ID_NAMESPACE, f"{workflow}/Config/{name}")), "name": name, "value": value, "type": "string"}
+        {"id": str(uuid.uuid5(_ID_NAMESPACE, f"{workflow}/{node}/{name}")), "name": name, "value": value, "type": "string"}
         for name, value in values.items()
     ]
-    return ("n8n-nodes-base.set", 3.4, {"assignments": {"assignments": assignments}, "includeOtherFields": True, "options": {}})
+    return ("n8n-nodes-base.set", 3.4,
+            {"assignments": {"assignments": assignments}, "includeOtherFields": include_other, "options": {}})
 
 
 def _hash_text(value: str, into: str) -> tuple:
@@ -342,13 +354,10 @@ def _write(operation: str, table: str, match: Mapping[str, str] | None, columns:
     return ("n8n-nodes-base.dataTable", 1.1, parameters)
 
 
-def _execute(target: str, inputs: Mapping[str, str], wait: bool = True) -> tuple:
-    schema = [{"id": key, "displayName": key, "required": False, "defaultMatch": False, "display": True,
-               "canBeUsedToMatch": True, "type": "string", "removed": False} for key in inputs]
+def _execute(target: str, wait: bool = True) -> tuple:
+    """Call a sub-workflow with the current item; the target is selected once after import, by its name."""
     return ("n8n-nodes-base.executeWorkflow", 1.2, {
         "workflowId": {"__rl": True, "value": "", "mode": "list", "cachedResultName": target},
-        "workflowInputs": {"mappingMode": "defineBelow", "value": dict(inputs), "matchingColumns": [], "schema": schema,
-                           "attemptToConvertTypes": False, "convertFieldsToString": True},
         "options": {"waitForSubWorkflow": wait},
     })
 

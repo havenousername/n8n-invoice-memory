@@ -11,28 +11,10 @@
         0
       ],
       "parameters": {
-        "inputSource": "workflowInputs",
-        "workflowInputs": {
-          "values": [
-            {
-              "name": "invoice_id",
-              "type": "string"
-            },
-            {
-              "name": "customer_id",
-              "type": "string"
-            },
-            {
-              "name": "manager_id",
-              "type": "string"
-            },
-            {
-              "name": "sample_url",
-              "type": "string"
-            }
-          ]
-        }
-      }
+        "inputSource": "passthrough"
+      },
+      "notes": "Expects the invoice row 01 Ingest appended: invoice_id and filename, plus customer_id and manager_id.",
+      "notesInFlow": true
     },
     {
       "id": "2ec1f06c-c84d-5599-afba-442bbc168247",
@@ -86,38 +68,6 @@
           "mode": "list",
           "cachedResultName": "03 Rebuild point"
         },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "customer_id": "={{ $('Config').first().json.customer_id }}",
-            "manager_id": "={{ $('Config').first().json.manager_id }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": true
-        },
         "options": {
           "waitForSubWorkflow": true
         }
@@ -134,7 +84,7 @@
       ],
       "parameters": {
         "method": "GET",
-        "url": "={{ $('Config').first().json.sample_url.startsWith($('Config').first().json.SAMPLES_BASE_URL + '/') ? $('Config').first().json.sample_url : 'https://sample-url-outside-SAMPLES_BASE_URL.invalid' }}",
+        "url": "={{ $('Config').first().json.SAMPLES_BASE_URL }}/{{ encodeURIComponent($('Config').first().json.filename) }}",
         "options": {
           "response": {
             "response": {
@@ -288,38 +238,6 @@
           "mode": "list",
           "cachedResultName": "03 Rebuild point"
         },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "customer_id": "={{ $('Config').first().json.customer_id }}",
-            "manager_id": "={{ $('Config').first().json.manager_id }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": true
-        },
         "options": {
           "waitForSubWorkflow": true
         }
@@ -469,38 +387,6 @@
           "mode": "list",
           "cachedResultName": "03 Rebuild point"
         },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "customer_id": "={{ $('Config').first().json.customer_id }}",
-            "manager_id": "={{ $('Config').first().json.manager_id }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": true
-        },
         "options": {
           "waitForSubWorkflow": true
         }
@@ -521,38 +407,6 @@
           "value": "",
           "mode": "list",
           "cachedResultName": "02b Write the narrative"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "customer_id": "={{ $('Config').first().json.customer_id }}",
-            "manager_id": "={{ $('Config').first().json.manager_id }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": true
         },
         "options": {
           "waitForSubWorkflow": true
@@ -860,7 +714,7 @@
           "invoice_id": "inv_seed_a",
           "customer_id": "acme",
           "manager_id": "m_anna",
-          "sample_url": "https://raw.githubusercontent.com/havenousername/n8n-invoice-memory/main/samples/acme-001.pdf"
+          "filename": "acme-001.pdf"
         }
       }
     ]

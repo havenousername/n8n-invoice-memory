@@ -10,6 +10,10 @@ from schema import MODELS
 PARTS = read_parts()
 BUILT = build_all(PARTS)
 STICKY = "n8n-nodes-base.stickyNote"
+EXECUTE = "n8n-nodes-base.executeWorkflow"
+# Nodes whose output item carries customer_id and manager_id, so a sub-workflow can be called right after them.
+IDS_PROVIDERS = {"Config", "Update the row: stage 1", "Update the row: stage 2", "Update the row: stage -1",
+                 "Show the sharp view", "Save the narrative", "Append the invoice row"}
 
 
 def nodes_of(workflow: dict) -> dict:
@@ -74,6 +78,24 @@ class EveryWorkflowTest(unittest.TestCase):
                 if "cloud.qdrant.io" in text:
                     self.assertIn(QDRANT_URL_PLACEHOLDER, text)
 
+    def test_sub_workflows_accept_the_callers_item_and_name_what_they_need(self):
+        for file in ("02-process.json", "02b-narrative.json", "03-rebuild-point.json"):
+            with self.subTest(file):
+                trigger = nodes_of(BUILT[file])["When Executed by Another Workflow"]
+                self.assertEqual(trigger["parameters"], {"inputSource": "passthrough"})
+                self.assertIn("customer_id and manager_id", trigger["notes"])
+                self.assertTrue(trigger["notesInFlow"])
+
+    def test_calls_carry_no_input_mapping_for_the_editor_to_reset(self):
+        for file, workflow in BUILT.items():
+            feeds = {target: source for source, _, target in edges_of(workflow)}
+            for node in workflow["nodes"]:
+                if node["type"] == EXECUTE:
+                    with self.subTest(file=file, node=node["name"]):
+                        self.assertNotIn("workflowInputs", node["parameters"])
+                        self.assertEqual(node["parameters"]["workflowId"]["value"], "")
+                        self.assertIn(feeds[node["name"]], IDS_PROVIDERS)
+
     def test_code_nodes_have_no_module_exports_statement(self):
         for file, workflow in BUILT.items():
             for node in workflow["nodes"]:
@@ -95,16 +117,23 @@ class RebuildPointTest(unittest.TestCase):
 
     def test_nodes_are_chained_in_order(self):
         order = ["When Executed by Another Workflow", "Config", "Hash the point id", "Load the customer row",
-                 "Load all invoice rows", "Compute the view", "Upsert the point with inference"]
+                 "Load all invoice rows", "Compute the view", "Upsert the point with inference", "Return what was rebuilt"]
         self.assertEqual(steps_of(self.workflow), order)
         self.assertEqual(edges_of(self.workflow), {(a, 0, b) for a, b in zip(order, order[1:])})
 
-    def test_trigger_takes_exactly_the_two_ids(self):
-        params = self.nodes["When Executed by Another Workflow"]["parameters"]
-        self.assertEqual(params["workflowInputs"]["values"],
-                         [{"name": "customer_id", "type": "string"}, {"name": "manager_id", "type": "string"}])
+    def test_pinned_input_for_manual_runs(self):
         self.assertEqual(self.workflow["pinData"]["When Executed by Another Workflow"],
                          [{"json": {"customer_id": "acme", "manager_id": "m_anna"}}])
+
+    def test_returns_the_ids_it_rebuilt(self):
+        node = self.nodes["Return what was rebuilt"]
+        self.assertFalse(node["parameters"]["includeOtherFields"])
+        values = {a["name"]: a["value"] for a in node["parameters"]["assignments"]["assignments"]}
+        self.assertEqual(values, {
+            "customer_id": from_node("Config", "customer_id"),
+            "manager_id": from_node("Config", "manager_id"),
+            "point_id": from_node("Compute the view", "body.points[0].id"),
+        })
 
     def test_data_table_reads_are_tenant_scoped_and_run_once(self):
         for name, table in (("Load the customer row", "customers"), ("Load all invoice rows", "invoices")):
@@ -153,8 +182,6 @@ class NarrativeTest(unittest.TestCase):
     def test_rebuild_is_called_and_awaited(self):
         node = self.nodes["Rebuild the point"]
         self.assertEqual(node["parameters"]["workflowId"]["cachedResultName"], "03 Rebuild point")
-        self.assertEqual(node["parameters"]["workflowInputs"]["value"],
-                         {k: from_node("Config", k) for k in ("customer_id", "manager_id")})
         self.assertTrue(node["parameters"]["options"]["waitForSubWorkflow"])
 
 
@@ -209,7 +236,10 @@ class ProcessTest(unittest.TestCase):
 
     def test_download_only_from_the_sample_base(self):
         url = self.nodes["Download the PDF for processing"]["parameters"]["url"]
-        self.assertIn("SAMPLES_BASE_URL", url)
+        self.assertEqual(url, "={{ $('Config').first().json.SAMPLES_BASE_URL }}/"
+                              "{{ encodeURIComponent($('Config').first().json.filename) }}")
+        self.assertNotIn("sample_url", json.dumps(self.workflow))
+        self.assertEqual(self.workflow["pinData"]["When Executed by Another Workflow"][0]["json"]["filename"], "acme-001.pdf")
 
 
 class IngestTest(unittest.TestCase):
@@ -261,7 +291,7 @@ class IngestTest(unittest.TestCase):
         node = self.nodes["Process in the background"]
         self.assertEqual(node["parameters"]["workflowId"]["cachedResultName"], "02 Process")
         self.assertFalse(node["parameters"]["options"]["waitForSubWorkflow"])
-        self.assertEqual(set(node["parameters"]["workflowInputs"]["value"]), {"invoice_id", "customer_id", "manager_id", "sample_url"})
+        self.assertIn(("Append the invoice row", 0, "Process in the background"), self.edges)
 
 
 if __name__ == "__main__":

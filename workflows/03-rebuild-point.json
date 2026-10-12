@@ -11,20 +11,10 @@
         0
       ],
       "parameters": {
-        "inputSource": "workflowInputs",
-        "workflowInputs": {
-          "values": [
-            {
-              "name": "customer_id",
-              "type": "string"
-            },
-            {
-              "name": "manager_id",
-              "type": "string"
-            }
-          ]
-        }
-      }
+        "inputSource": "passthrough"
+      },
+      "notes": "Expects customer_id and manager_id on the incoming item. Returns them with the point id.",
+      "notesInFlow": true
     },
     {
       "id": "fc533bd4-337f-5e92-a810-c79a2d06a1dc",
@@ -186,6 +176,42 @@
       }
     },
     {
+      "id": "3d3c3503-b97b-5f82-9cde-39e6994a5dce",
+      "name": "Return what was rebuilt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "96280d28-5832-57ca-a833-562a9821e3dc",
+              "name": "customer_id",
+              "value": "={{ $('Config').first().json.customer_id }}",
+              "type": "string"
+            },
+            {
+              "id": "f1971284-1bc8-568a-b0c3-27b9d711b2d7",
+              "name": "manager_id",
+              "value": "={{ $('Config').first().json.manager_id }}",
+              "type": "string"
+            },
+            {
+              "id": "2b4df907-2bc9-5b59-bf4c-4a89dcb456cb",
+              "name": "point_id",
+              "value": "={{ $('Compute the view').first().json.body.points[0].id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
       "id": "9a81b874-e7c8-501b-8f5a-50dd929bc7ab",
       "name": "Sticky Note",
       "type": "n8n-nodes-base.stickyNote",
@@ -262,6 +288,17 @@
         [
           {
             "node": "Upsert the point with inference",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert the point with inference": {
+      "main": [
+        [
+          {
+            "node": "Return what was rebuilt",
             "type": "main",
             "index": 0
           }

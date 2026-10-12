@@ -11,20 +11,10 @@
         0
       ],
       "parameters": {
-        "inputSource": "workflowInputs",
-        "workflowInputs": {
-          "values": [
-            {
-              "name": "customer_id",
-              "type": "string"
-            },
-            {
-              "name": "manager_id",
-              "type": "string"
-            }
-          ]
-        }
-      }
+        "inputSource": "passthrough"
+      },
+      "notes": "Expects customer_id and manager_id on the incoming item.",
+      "notesInFlow": true
     },
     {
       "id": "167e5169-39fb-59d5-9c0c-10b9585268e1",
@@ -266,38 +256,6 @@
           "value": "",
           "mode": "list",
           "cachedResultName": "03 Rebuild point"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "customer_id": "={{ $('Config').first().json.customer_id }}",
-            "manager_id": "={{ $('Config').first().json.manager_id }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": true
         },
         "options": {
           "waitForSubWorkflow": true

@@ -598,60 +598,6 @@
           "mode": "list",
           "cachedResultName": "02 Process"
         },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "invoice_id": "={{ $('Decide the rows').first().json.invoice.invoice_id }}",
-            "customer_id": "={{ $('Decide the rows').first().json.invoice.customer_id }}",
-            "manager_id": "={{ $('Decide the rows').first().json.invoice.manager_id }}",
-            "sample_url": "={{ $('Validate the submission').first().json.sample_url }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "invoice_id",
-              "displayName": "invoice_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "customer_id",
-              "displayName": "customer_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "manager_id",
-              "displayName": "manager_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "sample_url",
-              "displayName": "sample_url",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": true
-        },
         "options": {
           "waitForSubWorkflow": false
         }
