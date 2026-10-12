@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the verified invoice pipeline into the Q8nten GmbH booth demo: a live stream of German office documents kept as one progressive Qdrant point per office, with a Next.js manager view and console that make n8n, Qdrant, and the caching visible.
+**Goal:** Turn the verified invoice pipeline into the Q8nten GmbH booth demo: an endless stream of German office documents written by AI workers, kept as one progressive Qdrant point per office, with a Next.js manager view and console that make n8n, Qdrant, and the caching visible.
 
-**Architecture:** Two n8n Data Tables stay the source of truth; `03 Rebuild office point` turns them into one Qdrant point per office after every stage, with three text vectors served as Keyword, Line, and Meaning lenses. n8n handles intake from three sources (Form, console, a simulated working day), staged reading, duplicates, amendments, and reconcile sweeps. The dashboard reads Qdrant directly from its server and calls n8n webhooks only to send documents and control the day.
+**Architecture:** Data Tables stay the source of truth; `03 Rebuild office point` turns them into one Qdrant point per office after every stage, with three text vectors served as Keyword, Line, and Meaning lenses. n8n handles intake from three sources (Form, console, AI workers), staged reading, duplicates, amendments, and reconcile sweeps. One JavaScript PDF writer renders every document, in n8n and in the repo. The dashboard reads Qdrant directly from its server and calls n8n webhooks only to send documents and control the day.
 
-**Tech Stack:** Python 3.11+ stdlib (`unittest`) for samples and scripts; JavaScript for n8n Code nodes (`node --test`); n8n Cloud; Qdrant Cloud with Cloud Inference; OpenRouter (`anthropic/claude-haiku-5.5`, strict `json_schema`); Next.js App Router with TypeScript and Vitest; headless Chrome for PDFs.
+**Tech Stack:** Python 3.11+ stdlib (`unittest`); JavaScript for n8n Code nodes (`node --test`); n8n Cloud; Qdrant Cloud with Cloud Inference; OpenRouter (`anthropic/claude-haiku-5.5`, strict `json_schema`); Next.js App Router with TypeScript and Vitest; `pdftotext` for read-back checks.
 
 **Spec:** `docs/superpowers/specs/2026-10-12-office-budget-memory-design.md`. Carried-over conventions: `docs/superpowers/plans/2026-10-09-invoice-memory.md` (Script Rules, Execution Gates).
 
@@ -17,9 +17,10 @@
 - Company "Q8nten GmbH"; quarter Q4 2026; documents dated October 2026; booth 2026-10-14.
 - Offices: Anna (`m_anna`, Central): Berlin `berlin` CC-BER-01 Tom, Munich `munich` CC-MUC-01 Tom, Vienna `vienna` CC-VIE-01 Lena. Ben (`m_ben`, West): Amsterdam `amsterdam` CC-AMS-01 Jules, Paris `paris` CC-PAR-01 Jules, London `london` CC-LON-01 Mia. Shard keys `m_anna`, `m_ben`.
 - Categories (key, English, German): `people` People (Personal), `cloud` Cloud infrastructure (Cloud-Infrastruktur), `gpu` GPU compute (GPU-Rechenleistung), `office` Office and facilities (Büro und Ausstattung), `travel` Travel and events (Reisen und Events).
-- Document types: `cost` PO-nnnn (Bestellung), `deal` DEAL-nnnn (Kundenauftrag), `credit` CN-nnnn (Gutschrift). German labels, German numbers and dates. Every amount is at least 1.000,00 € and below 1.000.000,00 €, so the rough read misreads every amount by a factor of about 1,000.
-- File names `<office-code>-<key-lowercase>-v<version>.pdf` with office codes `ber muc vie ams par lon`; duplicates `<original name without .pdf>-copy.pdf`, byte-identical.
-- Booth documents: `muc-po-2041-v1.pdf` (Hetzner, cloud, 12.300,00 €), `ber-po-1042-v1-copy.pdf`, `ber-po-1042-v2.pdf` (amendment raising GPU servers so Berlin goes over plan in GPU).
+- Budgets (EUR, people/cloud/gpu/office/travel): berlin 820000/180000/120000/95000/60000, munich 760000/140000/210000/90000/50000, vienna 540000/90000/60000/70000/40000, amsterdam 610000/150000/90000/80000/55000, paris 700000/120000/140000/110000/70000, london 880000/200000/160000/130000/90000.
+- Document types: `cost` PO-nnnn (Bestellung), `deal` DEAL-nnnn (Kundenauftrag), `credit` CN-nnnn (Gutschrift). German labels, numbers, and dates. Every amount is at least 1.000,00 € and below 1.000.000,00 €, so the rough read misreads every amount by a factor of about 1,000.
+- File names `<office-code>-<key-lowercase>-v<version>.pdf` with codes `ber muc vie ams par lon`; resends and duplicates add `-copy` and are byte-identical.
+- Static PDFs: booth `ber-po-1042-v1.pdf`, `muc-po-2041-v1.pdf`, `ber-po-1042-v1-copy.pdf`, `ber-po-1042-v2.pdf`; gate-only `ams-deal-3101-v1.pdf`, `par-cn-4101-v1.pdf`.
 - Qdrant collection `offices`; vectors and models unchanged; point id SHA-256 of `<manager_id>/<office_id>` formatted as UUID.
 - n8n: no instance ids in exported JSON; Data Tables and credentials by name; sub-workflows accept the caller's item and state their contract in a trigger note; every canvas at most 15 nodes and 4 sticky notes; node names are sentences; every webhook requires the `Dashboard secret` header credential.
 - The dashboard never polls through n8n. Animations never gate data. Server text renders as text. Qdrant brand (prototype v3). Writing: American English, sentence case, no em dashes.
@@ -29,44 +30,33 @@
 
 1. An amendment that arrives before its original is read, or an older version that arrives after a newer one: the highest version read is current, and a later-arriving older version never becomes current. Pinned in Task 4 (`office-view.test.js`, "late older version").
 2. A credit note larger than what was committed in its category: committed stays at 0, never negative, and remaining never exceeds the budget. Pinned in Task 4 ("credit larger than committed").
-3. The vision read returns a cost center that disagrees with the office the file belongs to: the document goes to stage -1 with "cost center mismatch", not into another office. Pinned in Task 3 (`validate.test.js`, "cost center mismatch").
-4. A duplicate of a document that is later amended: the duplicate stays counted as a duplicate and is never summed, before or after the amendment. Pinned in Task 4 ("duplicate of an amended document").
-5. A blank, whitespace-only, or very long Ask query: blank is rejected with a message and no request; long input is cut to 200 characters. Pinned in Task 8 (`ask.test.ts`).
+3. The vision read returns a cost center that disagrees with the office the document belongs to: stage -1 with "cost center mismatch", never booked to another office. Pinned in Task 3 (`validate.test.js`, "cost center mismatch").
+4. The AI worker returns an out-of-range amount, an unknown category, a category on a deal, or an amendment of a key that is not in its recent list: the event is rejected with a reason, nothing is issued, and the day continues with the next slot. Pinned in Task 6 (`worker.test.js`, "rejected events").
+5. A blank, whitespace-only, or very long Ask query: blank is rejected with a message and no request; long input is cut to 200 characters. Pinned in Task 9 (`ask.test.ts`).
 
 ---
 
-### Task 1: Q8nten samples, budgets, and the scripted day
+### Task 1: Office data, the PDF writer, and the static PDFs
 
 **Files:**
-- Rewrite: `samples/gen.py`, `samples/test_gen.py`
-- Modify: `samples/print.sh` (copy every duplicate listed in `html/duplicates.txt` instead of the hardcoded beta pair)
-- Generated: `samples/offices.json`, `samples/manifest.json`, `samples/expected-positions.json` (the oracle's positions for all script documents, then with the booth documents), `samples/*.pdf` (old invoice PDFs deleted)
-- Test: `python3 -m unittest discover -s samples`
+- Rewrite: `samples/gen.py`, `samples/test_gen.py` (data only: offices and the static documents)
+- Create: `workflows/code/pdf.js`, `workflows/code/pdf.test.js`, `samples/render.mjs`
+- Delete: `samples/print.sh`, the 14 invoice PDFs, `samples/manifest.json`'s invoice content
+- Generated: `samples/offices.json`, `samples/manifest.json` (static documents only), `samples/*.pdf` (six static PDFs)
+- Test: `python3 -m unittest discover -s samples`; `node --test workflows/code/pdf.test.js`; `pdftotext` read-back
 
 **Interfaces:**
 - `samples/offices.json`: list of `{office_id, code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, budgets: {people, cloud, gpu, office, travel}}`.
-- `samples/manifest.json`: list of `{file, office_id, manager_id, worker_id, doc_type, doc_key, version, date (ISO), counterparty, category (key or null), amount, description_de, description_en, role ("script" | "booth"), order (int or null), duplicate_of (file or null)}`.
-- `gen.py` pure functions: `german_money(amount) -> str` (`12.300,00 €`), `german_date(iso) -> str` (`05.10.2026`), `render_html(doc, office) -> str`, `build() -> (pages, manifest, offices, duplicates)`, and `expected_positions(manifest_rows, offices) -> {office_id: {"lines": {category: {"budget","committed","credited","remaining","over_by"}}, "booked", "deal_count", "superseded_count", "duplicate_count"}}`, the independent Python oracle for Task 7's burst check.
-- Budgets (EUR): berlin 820000/180000/120000/95000/60000, munich 760000/140000/210000/90000/50000, vienna 540000/90000/60000/70000/40000, amsterdam 610000/150000/90000/80000/55000, paris 700000/120000/140000/110000/70000, london 880000/200000/160000/130000/90000 (people/cloud/gpu/office/travel).
+- `samples/manifest.json`: list of `{file, office_id, manager_id, worker_id, doc_type, doc_key, version, date, counterparty, category, amount, description_de, description_en, role ("booth" | "gate"), duplicate_of}`.
+- `gen.py` pure functions: `offices() -> list`, `static_documents() -> list`, `main()` writes both JSON files.
+- `pdf.js` (pasteable, no `require`): `germanMoney(amount) -> string`, `germanDate(iso) -> string`, `documentLines(doc, office) -> string[]` (title, header, German labels, values, footer), `renderPdf(doc, office) -> Uint8Array` (one A4 page, Helvetica with WinAnsiEncoding, so ä, ö, ü, ß, and € work; no timestamps; correct xref offsets).
+- `samples/render.mjs` imports `pdf.js` and writes each manifest entry's PDF; a duplicate is a byte copy of its original.
 
-- [ ] **Step 1: Write the failing tests** (`samples/test_gen.py`, no files written)
-  - six offices; three per manager; controllers and cost centers exactly as in Global Constraints; budgets as listed
-  - 34 to 40 documents; every amount within [1000, 1000000); key prefix matches type (PO cost, DEAL deal, CN credit); deals have category null, costs and credits a category key
-  - every file name matches the convention and its office code; at least 3 amendments, each with every lower version present and ordered after its predecessor; at least 2 duplicates, byte-identical copies ordered after their originals
-  - the three booth documents exist with `role` "booth" and no `order`; `ber-po-1042-v1.pdf` is in the script before any booth document
-  - `expected_positions` over all script documents: exactly two offices over plan in at least one category; adding the booth amendment puts Berlin over plan in `gpu`; at least one office over plan in `travel`
-  - `description_en` of `ber-po-1042-v2.pdf` contains "GPU servers" and "inference launch"
-  - rendered pages carry German labels (Belegnummer, Version, Datum, Kostenstelle, Betrag or Auftragswert), German money and dates, "Q8nten GmbH", and "Version 2 (ersetzt Version 1)" on amendments; markup is escaped
-  - `german_money(12300)` is `12.300,00 €`; `german_money(1250.5)` is `1.250,50 €`; `german_date("2026-10-05")` is `05.10.2026`
-  - `expected_positions`: a credit larger than committed floors committed at 0; a superseded version is not summed; a duplicate is counted and not summed
-
-- [ ] **Step 2: Run, verify they fail** (`python3 -m unittest discover -s samples`: errors on the missing functions).
-
-- [ ] **Step 3: Implement `gen.py`** with the data as constants, then rerun until `OK`.
-
-- [ ] **Step 4: Print the PDFs.** Run `python3 samples/gen.py && samples/print.sh`. Expected: one PDF per manifest row and identical SHA-256 lines for each duplicate pair. Delete the old invoice PDFs and `samples/html` output first (`git rm samples/*-0??.pdf`).
-
-- [ ] **Step 5: Commit** (`feat(samples): Q8nten offices, budgets, and a scripted day of German documents`). Push to `origin main` only after asking, since the Form and n8n download samples from the public raw URL.
+- [ ] **Step 1: Write the failing Python tests:** six offices with managers, controllers, cost centers, and budgets exactly as in Global Constraints; six static documents with the file names above; `ber-po-1042-v2` amends `ber-po-1042-v1` (same key, version 2, higher amount, `description_en` contains "GPU servers" and "inference launch"); the copy has `duplicate_of`; the gate documents are a deal (category null) and a credit note; every amount within [1000, 1000000).
+- [ ] **Step 2: Write the failing JavaScript tests:** `germanMoney(12300)` is `12.300,00 €`, `germanMoney(1250.5)` is `1.250,50 €`; `germanDate("2026-10-05")` is `05.10.2026`; `documentLines` carries Q8nten GmbH, the right title (BESTELLUNG, KUNDENAUFTRAG, GUTSCHRIFT), Belegnummer, `Version 2 (ersetzt Version 1)` on amendments, Kostenstelle, Lieferant or Kunde, Kategorie (not on deals), Beschreibung, Betrag or Auftragswert, and the synthetic-data footer; `renderPdf` returns the same bytes twice for the same input, starts with `%PDF-1.4`, ends with `%%EOF`, and every xref offset points at its `n 0 obj`.
+- [ ] **Step 3: Run, verify both fail; implement; run, verify green.**
+- [ ] **Step 4: Render and read back.** `python3 samples/gen.py && node samples/render.mjs`, then `pdftotext` on each PDF: every label and value is present, umlauts and € included; the copy's SHA-256 equals its original's.
+- [ ] **Step 5: Commit** (`feat(samples): Q8nten offices, a deterministic German PDF writer, static booth PDFs`). Ask before pushing; the Form and n8n download static PDFs from the public raw URL.
 
 ---
 
@@ -74,17 +64,16 @@
 
 **Files:**
 - Modify: `scripts/openrouter_check.py`, `scripts/test_openrouter_check.py`
-- Test: unit tests, then three live calls
 
 **Interfaces:**
 - `REQUIRED_FIELDS = ("doc_type", "doc_key", "version", "cost_center", "date", "counterparty", "category", "amount", "description_en")`
 - `document_schema() -> dict`: strict; `doc_type` enum cost, deal, credit; `version` integer; `category` enum people, cloud, gpu, office, travel, none; `amount` number; `date` described as YYYY-MM-DD converted from the German date; `description_en` described as one English sentence.
-- `SYSTEM_PROMPT` explains: German business document of Q8nten GmbH; convert German numbers and dates; category none for deals; translate the description to English.
-- `extraction_body`, `parse_reply`, `require_synthetic` keep their signatures; `main` prints fields and latency.
+- `SYSTEM_PROMPT`: a German business document of Q8nten GmbH; convert German numbers and dates; category none for deals; translate the description to English.
+- `extraction_body`, `parse_reply`, `require_synthetic` keep their signatures.
 
-- [ ] **Step 1: Update the failing tests:** the schema requires exactly `REQUIRED_FIELDS` in order, enums as above, `additionalProperties` false; the prompt mentions German number format and English translation; `parse_reply` names missing fields.
+- [ ] **Step 1: Update the failing tests** (schema fields and enums, prompt content, missing-field messages).
 - [ ] **Step 2: Run, verify they fail; implement; run, verify `OK`.**
-- [ ] **Step 3: Live gate.** Run `python3 scripts/openrouter_check.py samples/muc-po-2041-v1.pdf`, then one deal and one credit note from the pool. Expected for each: every field present, `amount` equal to the manifest, `date` ISO, `category` none for the deal, an English `description_en`. Record model, latencies, and any field that needed prompt changes in this task's notes.
+- [ ] **Step 3: Live gate** on `muc-po-2041-v1.pdf`, `ams-deal-3101-v1.pdf`, and `par-cn-4101-v1.pdf`: every field present, `amount` and `date` equal to the manifest, category none for the deal, English `description_en`. Record latencies here.
 - [ ] **Step 4: Commit** (`test(openrouter): strict schema and gate for German office documents`).
 
 ---
@@ -92,44 +81,35 @@
 ### Task 3: German rough read and document validation
 
 **Files:**
-- Rewrite: `workflows/code/coarse.js`, `workflows/code/coarse.test.js`, `workflows/code/validate.js`, `workflows/code/validate.test.js`
-- Test: `node --test workflows/code/*.test.js`, plus the `pdftotext` read-back over every sample
+- Rewrite: `workflows/code/coarse.js`, `coarse.test.js`, `validate.js`, `validate.test.js`
 
 **Interfaces:**
-- `coarseRead(text) -> {doc_type, doc_key, version, date, cost_center, counterparty, category, amount}`: title BESTELLUNG, KUNDENAUFTRAG, or GUTSCHRIFT gives the type; `Belegnummer`, `Version` (first integer), `Datum` (DD.MM.YYYY to ISO), `Kostenstelle`, `Lieferant` or `Kunde`, `Kategorie` (German label to key), `Betrag` or `Auftragswert` parsed naively (commas removed), so `12.300,00 €` reads 12.3. Missing labels give null; empty text gives all nulls.
-- `toNumber(value) -> number` keeps its rules (German and English formats).
-- `validateDocument(obj, expectedCostCenter) -> {doc_type, doc_key, version, cost_center, date, counterparty, category, amount, description_en}`: throws `bad doc_type`, `bad doc_key` (must match `^(PO|DEAL|CN)-\d{4}$` and its type), `bad version` (integer of at least 1), `bad date`, `bad category` (none for deals, one of five for costs and credits; `none` becomes null), `amount not numeric` or `amount must be positive`, `missing description_en`, and `cost center mismatch` when it differs from `expectedCostCenter`. Trims `description_en` to 160 characters and returns only these keys.
+- `coarseRead(text) -> {doc_type, doc_key, version, date, cost_center, counterparty, category, amount}`: title gives the type; `Belegnummer`, `Version` (first integer), `Datum` (DD.MM.YYYY to ISO), `Kostenstelle`, `Lieferant` or `Kunde`, `Kategorie` (German label to key), `Betrag` or `Auftragswert` parsed naively with commas removed, so `12.300,00 €` reads 12.3. Missing labels give null; empty text gives all nulls.
+- `toNumber(value) -> number` keeps its rules.
+- `validateDocument(obj, expectedCostCenter) -> {doc_type, doc_key, version, cost_center, date, counterparty, category, amount, description_en}`: throws `bad doc_type`, `bad doc_key` (`^(PO|DEAL|CN)-\d{4}$`, prefix matching the type), `bad version`, `bad date`, `bad category` (none for deals, one of five otherwise; `none` becomes null), `amount not numeric`, `amount must be positive`, `missing description_en`, `cost center mismatch`. Trims `description_en` to 160 characters; returns only these keys.
 
-- [ ] **Step 1: Write the failing tests:** a PO page text parses every field with amount 12.3; a deal reads `Auftragswert` and category null; a credit note reads type credit; "Version 2 (ersetzt Version 1)" gives 2; `05.10.2026` gives `2026-10-05`; empty text gives nulls; `validateDocument` accepts a valid cost, deal, and credit; rejects each bad field above with its message; "cost center mismatch" (Review Focus 3); `amount: "12.300,00 €"` coerces to 12300; extra keys are dropped.
+- [ ] **Step 1: Write the failing tests:** rough reads of a PO, a deal, and a credit note rendered by `pdf.js` then extracted with `pdftotext` (fixtures checked in under `workflows/code/fixtures/`), amount 12.3 for 12.300,00 €; amendment version 2; empty text; each validation error above, including "cost center mismatch" (Review Focus 3); German string amounts coerce; extra keys dropped.
 - [ ] **Step 2: Run, verify they fail; implement; run, verify `fail 0`.**
-- [ ] **Step 3: Read back every sample PDF** with `pdftotext` through `coarseRead` (as in the invoice plan's Task 5 Step 4): every key, version, date, cost center, and counterparty parses; every amount reads about 1,000 times too small.
-- [ ] **Step 4: Commit** (`feat(code): German rough read and document validation`).
+- [ ] **Step 3: Commit** (`feat(code): German rough read and document validation`).
 
 ---
 
-### Task 4: The office view
+### Task 4: The office view and its Python oracle
 
 **Files:**
-- Create: `workflows/code/office-view.js`, `workflows/code/office-view.test.js`
-- Modify: `workflows/code/ids.js`, `workflows/code/ids.test.js` (replace `resolveUpload` with `resolveDocument`)
-- Delete: `workflows/code/view.js`, `view.test.js`, `cards.js`, `cards.test.js`, `match.js`, `match.test.js` (the dashboard owns shaping now)
-- Modify: `workflows/code/paste.test.js` (new source list)
+- Create: `workflows/code/office-view.js`, `office-view.test.js`, `scripts/positions.py`, `scripts/test_positions.py`
+- Modify: `workflows/code/ids.js`, `ids.test.js` (`resolveDocument` replaces `resolveUpload`), `paste.test.js`
+- Delete: `workflows/code/view.js`, `view.test.js`, `cards.js`, `cards.test.js`, `match.js`, `match.test.js`
 
 **Interfaces:**
-- `resolveDocument(file, documents) -> {office_id, manager_id, worker_id, duplicate_of}`: `documents` maps file names to manifest entries; throws `unknown document` for anything else (own keys only).
-- `computeOfficeView(office, rows, budgets, nowIso) -> {payload, texts}` where `office = {office_id, manager_id, name, region, narrative, narrative_at, narrative_revision}`, `rows` are `documents` Data Table rows, `budgets = {people, cloud, gpu, office, travel}`.
-  - Fields come from `llm_fields` when stage is 2 or more, else `regex_fields`. Stage -1 rows use regex fields and count as stage 1 with an error.
-  - Rows of kind `duplicate` are counted in `duplicate_count`, listed with status `duplicate`, never summed, and ignored for stage.
-  - Stage-0 rows are listed with status `pending` and count toward `pending_count`.
-  - Per `doc_key`, the highest version among rows with a known key is current; ties go to the latest `received_at`; the rest are `superseded`.
-  - `lines`: for each budget category, `committed = max(0, current costs - current credits)`, `credited`, `remaining = budget - committed`, `over_by = max(0, committed - budget)`; totals `budget`, `committed`, `used_pct` (one decimal); `booked` and `deal_count` from current deals.
-  - `stage` is the minimum over current and pending documents (0 when there are none); `latest` is the newest row of any kind; `source_revision` fingerprints every row including kind and `duplicate_of`; the summary is fresh only when stage is 2, nothing is pending, and the revision matches.
-  - `texts.digest`: one line per current document `KEY vN | date | Type | Category | counterparty | amount EUR | description_en`; `texts.bm25`: every row's raw text plus current English descriptions; `texts.summary`: the summary text.
+- `resolveDocument(file, documents) -> {office_id, manager_id, worker_id, duplicate_of}` for static files; throws `unknown document` (own keys only).
+- `computeOfficeView(office, rows, budgets, nowIso) -> {payload, texts}` with the rules of the spec's section 4: fields from `llm_fields` at stage 2 or more, else `regex_fields`; stage -1 counts as rough with an error; duplicate rows counted, listed, never summed, ignored for stage; stage-0 rows pending; per `doc_key` the highest version read is current (ties to the latest `received_at`), the rest superseded; per category `committed = max(0, costs - credits)`, `credited`, `remaining`, `over_by`; totals, `used_pct`, `booked`, `deal_count`; `stage`, `pending_count`, `latest`, `source_revision` (every row, including kind and `duplicate_of`), summary freshness; `texts.digest` one line per current document, `texts.bm25` raw text plus English descriptions, `texts.summary`.
+- `scripts/positions.py`: `expected_positions(issued_rows, offices) -> {office_id: {lines, booked, deal_count, superseded_count, duplicate_count}}` from ground truth (resends count as duplicates).
 
-- [ ] **Step 1: Write the failing tests:** a scripted Berlin day gives the expected lines and totals; an amendment supersedes version 1 and the total follows version 2; **late older version** (Review Focus 1); **credit larger than committed** (Review Focus 2); **duplicate of an amended document** (Review Focus 4); a stage-0 row is pending and holds the stage at 0; an error row counts as rough; the summary goes stale when an amendment arrives; the digest and bm25 texts; an office with no rows gives zeros and stage 0; `resolveDocument` on a known file, an unknown file, and `__proto__`.
-- [ ] **Step 2: Run, verify they fail; implement; run, verify `fail 0`.**
-- [ ] **Step 3: Cross-check against the Python oracle:** a test runs `computeOfficeView` over manifest-derived rows for every office (script documents, then the booth documents) and compares lines and counts with a fixture that `samples/gen.py` writes, `samples/expected-positions.json`.
-- [ ] **Step 4: Commit** (`feat(code): office view with versions, credits, duplicates, and budgets`).
+- [ ] **Step 1: Write the failing tests:** a Berlin day gives the expected lines; an amendment supersedes version 1; **late older version** (Review Focus 1); **credit larger than committed** (Review Focus 2); a duplicate of an amended document is never summed; a pending row holds stage 0; an error row counts as rough; the summary goes stale on an amendment; digest and bm25 texts; no rows gives zeros; `resolveDocument` known, unknown, and `__proto__`; `expected_positions` mirrors the same rules on issued rows.
+- [ ] **Step 2: Run, verify they fail; implement; run, verify green.**
+- [ ] **Step 3: Cross-check:** a test feeds the same fixture day to both `computeOfficeView` (with fields as if read perfectly) and `expected_positions`, and compares lines and counts through a JSON fixture written by `test_positions.py`.
+- [ ] **Step 4: Commit** (`feat(code): office view with versions, credits, duplicates, budgets`).
 
 ---
 
@@ -140,138 +120,143 @@
 - Generated: `dashboard/lib/reference-bodies.json` (by `python3 scripts/bodies.py --json`)
 
 **Interfaces:**
-- `schema.COLLECTION = "offices"`; `PAYLOAD_INDEXES`: `manager_id` (keyword, tenant), `office_id` (keyword), `stage` (integer), `updated_at` (datetime), `latest.received_at` (datetime), `lines[].category` (keyword), `lines[].over_by` (float), `documents[].type` (keyword). Vectors unchanged.
-- `bodies`: `upsert` unchanged; `office_list(manager, over_gt=None, limit=50)` (tenant filter, ordered by `updated_at` desc, nested `lines` filter `over_by > over_gt` when given); `office_scroll(manager, office)`; `ask_batch(manager, text, now_iso, limit=5) -> {"searches": [keyword, line, meaning, fused]}`, each with the tenant filter, the fused one being the section 11 shape with decay on `updated_at`. `removed_scroll`, `customer_scroll`, `hybrid_query`, and `purge` are removed.
-- `python3 scripts/bodies.py --json` prints `{name: body}` for fixed sample arguments; the dashboard's TypeScript bodies must equal it (Task 8).
-- `check_point.py MANAGER OFFICE [--show] [--expect] [--present] [--absent]` reads with `office_scroll`.
-- `smoke.py` fixtures: `m_anna/berlin` over plan in gpu by 16000; `m_anna/vienna` decoy over plan in travel by 500 only; `m_ben/berlin` same slug in the other tenant. Checks: setup, upsert, nested over-plan (`over_gt=1000` returns berlin only), tenant, ask batch (four result lists; keyword search for `PO-1042` ranks berlin first), replace (re-upserting berlin with a new payload replaces it, the supersede path).
+- `schema.COLLECTION = "offices"`; indexes `manager_id` (keyword, tenant), `office_id` (keyword), `stage` (integer), `updated_at` (datetime), `latest.received_at` (datetime), `lines[].category` (keyword), `lines[].over_by` (float), `documents[].type` (keyword).
+- `bodies`: `upsert`; `office_list(manager, over_gt=None, limit=50)`; `office_scroll(manager, office)`; `ask_batch(manager, text, now_iso, limit=5) -> {"searches": [keyword, line, meaning, fused]}`. Removed: `removed_scroll`, `customer_scroll`, `hybrid_query`, `purge`.
+- `check_point.py MANAGER OFFICE [--show] [--expect] [--present] [--absent]`.
+- `smoke.py` fixtures: `m_anna/berlin` over plan in gpu by 16000, `m_anna/vienna` decoy over by 500, `m_ben/berlin` same slug in the other tenant. Checks: setup, upsert, over plan (`over_gt=1000` gives berlin only), tenant, ask batch (four lists; `PO-1042` keyword ranks berlin first), replace.
 
-- [ ] **Step 1: Update the failing tests** for each interface above (unit, no network), including that every filtered body carries the shard key and the tenant condition and that the reference JSON is stable.
+- [ ] **Step 1: Update the failing tests** for each interface (unit, no network).
 - [ ] **Step 2: Run, verify they fail; implement; run, verify `OK`.**
-- [ ] **Step 3: Live.** `python3 scripts/setup_collection.py --collection offices` twice (second run prints only the ok line), then `python3 scripts/smoke.py` (all checks ok, collection removed).
-- [ ] **Step 4: Image gate.** Upsert one point with an image inference object (`{"image": <url of a rendered sample page>, "model": "qdrant/clip-vit-b-32-vision"}`) into a disposable collection with a 512-dimension `page` vector. Record pass or fail in the spec's section 4 note. A failure cuts the `page` vector (Task 12 is skipped).
+- [ ] **Step 3: Live:** `python3 scripts/setup_collection.py --collection offices` twice, then `python3 scripts/smoke.py`.
+- [ ] **Step 4: Image gate:** one upsert with an image inference object (`qdrant/clip-vit-b-32-vision`, 512 dimensions) into a disposable collection, using a PNG of a static page. Record pass or fail in the spec's section 4. A failure skips Task 13.
 - [ ] **Step 5: Commit** (`feat(qdrant): offices collection, three-lens batch body, smoke`).
 
 ---
 
-### Task 6: Generated n8n workflows for the new domain
+### Task 6: The AI workers' logic
+
+**Files:**
+- Create: `workflows/code/worker.js`, `workflows/code/worker.test.js`
+
+**Interfaces:**
+- `planSlots(count, offices, random) -> [{office_id}]`: weighted so every office appears in a burst of 12.
+- `workerRequest(office, recent, model) -> body`: strict schema `{action: new_cost | new_deal | new_credit | amend | resend, target_key, counterparty, category, amount, description_de, description_en}`; the prompt gives the office, its budgets and committed position, and `recent` (its last 8 issued documents with key, version, type, category, amount, description).
+- `checkEvent(event, office, recent) -> event`: throws `amount out of range` (outside [1000, 1000000) or above 40% of the category budget for costs), `bad category`, `category on a deal`, `unknown target_key` (amend or resend must name a key in `recent`), `missing description`.
+- `toDocument(event, office, recent, numbers, nowIso) -> {doc, filename, resend_of}`: assigns the next key per type from `numbers` (PO from 1100, DEAL from 3100, CN from 4100), the next version for an amendment (the latest version plus 1, same counterparty and category unless the event changes them), and for a resend returns the original document unchanged with `-copy` in the file name.
+
+- [ ] **Step 1: Write the failing tests:** slots cover all six offices in 12; the request body is strict with the actions above and includes recent keys; **rejected events** for each reason (Review Focus 4); new keys never collide with recent ones; an amendment gets version n+1 and keeps its key; a resend renders byte-identical PDF bytes through `renderPdf`.
+- [ ] **Step 2: Run, verify they fail; implement; run, verify green.**
+- [ ] **Step 3: Commit** (`feat(code): AI worker events, checks, and key assignment`).
+
+---
+
+### Task 7: Generated n8n workflows
 
 **Files:**
 - Modify: `scripts/build_workflows.py`, `scripts/test_build_workflows.py`
-- Modify glue: `workflows/nodes/compute-the-view.js`, `prepare-the-narrative-snapshot.js`, `validate-the-fields.js`, `validate-the-submission.js`; rename `decide-the-rows.js` to `build-the-rows.js`; create `pick-the-next-documents.js`
-- Modify tests: `workflows/code/narrative.test.js`, `process.test.js`, `ingest.test.js`, `rebuild-point.test.js`; create `record.test.js`, `working-day.test.js`
-- Generated: `workflows/00-working-day.json`, `01-ingest.json`, `01b-record-a-document.json`, `02-process.json`, `02b-summary.json`, `03-rebuild-office-point.json`, `05-dashboard-writes.json`, `06-reconcile.json`; delete `02b-narrative.json`, `03-rebuild-point.json`
+- Glue (`workflows/nodes/`): update `compute-the-view.js`, `prepare-the-narrative-snapshot.js`, `validate-the-fields.js`, `validate-the-submission.js`, `prepare-the-vision-request.js` (PDF from the row); rename `decide-the-rows.js` to `build-the-rows.js`; create `read-the-pdf-from-the-row.js`, `plan-the-day.js`, `issue-the-document.js`
+- Sandbox tests (`workflows/code/`): update `narrative.test.js`, `process.test.js`, `ingest.test.js`, `rebuild-point.test.js`; create `record.test.js`, `working-day.test.js`
+- Generated: `workflows/00-working-day.json`, `01-ingest.json`, `01b-record-a-document.json`, `02-process.json`, `02b-summary.json`, `03-rebuild-office-point.json`, `05-dashboard-writes.json`, `06-reconcile.json`, `07-maintenance.json`; delete `02b-narrative.json`, `03-rebuild-point.json`
 
 **Interfaces:**
-- Contracts (trigger notes): `03` needs `office_id` and `manager_id`, returns `{office_id, manager_id, point_id}`; `02` needs the document row (`document_id`, `filename`, `office_id`, `manager_id`); `02b` needs `office_id` and `manager_id`; `01b` needs `file` and answers `{status: "received" | "duplicate", document_id?, duplicate_of?, office_id, manager_id}`; `06` accepts any item.
-- Injected constants (generated from samples): `OFFICES` (by `office_id`: name, region, manager, cost center), `OFFICE_BUDGETS`, `DOCUMENTS` (file to manifest entry), `SCRIPT` (files in order), `VISION_REQUEST_TEMPLATE` (from `openrouter_check.extraction_body(b"", "", "")`).
-- Data Tables: `documents`, `offices`, `simulation` (`name`, `cursor`, `running`), all by name.
-- Webhooks (header credential `Dashboard secret`): `POST /webhook/send` `{file}`, `POST /webhook/day/start` `{count}`, `POST /webhook/day/stop`, `POST /webhook/reset`.
-- Before building, read n8n's source for `splitInBatches` (Loop Over Items), `wait`, `scheduleTrigger`, `respondToWebhook`, the Webhook node's header authentication, and the Data Table delete conditions (`isNotEmpty`), the same way the earlier node parameters were checked. Record the parameter shapes in a comment in `build_workflows.py`.
+- Contracts (trigger notes): `03` needs `office_id`, `manager_id`, returns `{office_id, manager_id, point_id}`; `02` needs the document row (`document_id`, `office_id`, `manager_id`); `02b` needs `office_id`, `manager_id`; `01b` needs either `file`, or `filename`, `pdf_base64`, `office_id`, `worker_id`, and answers `{status, document_id?, duplicate_of?, office_id, manager_id}`; `06` accepts any item.
+- Injected constants: `OFFICES`, `OFFICE_BUDGETS`, `STATIC_DOCUMENTS`, `VISION_REQUEST_TEMPLATE`.
+- Data Tables by name: `documents` (with `pdf_base64`), `offices`, `simulation` (`name`, `running`), `issued`.
+- Webhooks with header auth: `POST /webhook/send` (05), `POST /webhook/day/stop` (05), `POST /webhook/day/start` (00), `POST /webhook/reset` and `GET /webhook/issued` (07).
+- First, read n8n's source for `splitInBatches`, `wait`, `scheduleTrigger`, `respondToWebhook`, the Webhook node's header authentication, `prepareBinaryData` in Code nodes, and Data Table delete conditions; note the shapes in `build_workflows.py`.
 
-- [ ] **Step 1: Write the failing structural tests:** each workflow's node order and links (including error outputs in `02` to `Update the row: stage -1`), at most 15 nodes, each Execute node placed after an ids provider, no input mappings, every webhook with header auth, injected constants equal to the samples, `01b`'s duplicate branch appends a `duplicate` row and rebuilds, `00` checks `running` before each document and waits between documents, `06` runs on a 5-minute schedule and from a call, and the committed JSON matches the sources.
-- [ ] **Step 2: Write the failing sandbox tests** for each glue: `validate-the-submission` (known file, unknown file, the manifest gives office and worker), `build-the-rows` (office row and document row; duplicate row with `duplicate_of`), `compute-the-view` (seeded rows to an upsert body with the office payload), `prepare-the-narrative-snapshot` (budget aggregates and recent amendments in the prompt; strict schema; a not-sharp point returns nothing), `validate-the-fields` (cost center from `OFFICES`; mismatch throws), `pick-the-next-documents` (next N from the cursor; stops at the end of the script).
-- [ ] **Step 3: Implement the builders and glue; generate; run both suites until green.**
-- [ ] **Step 4: Commit** (`feat(n8n): office workflows, working day, shared intake, reconcile`).
+- [ ] **Step 1: Write the failing structural tests:** node order and links per workflow (including `02`'s error outputs to stage -1), at most 15 nodes, Execute nodes after ids providers and without mappings, header auth on every webhook, injected constants equal to the samples, `01b`'s two inputs and its duplicate branch, `00` checking `running` before each slot, rejecting a bad event without stopping, logging to `issued`, and waiting between slots, `06` on a 5-minute schedule and callable, `07`'s reset and issued paths, committed JSON matching the sources.
+- [ ] **Step 2: Write the failing sandbox tests** for each glue: `validate-the-submission` (static file, generated input, unknown file), `build-the-rows` (document and duplicate rows with `pdf_base64`), `read-the-pdf-from-the-row` (binary prepared from base64), `compute-the-view`, `prepare-the-narrative-snapshot` (budget aggregates and recent amendments), `validate-the-fields` (cost center from `OFFICES`), `plan-the-day`, `issue-the-document` (event to rendered PDF and `issued` row; a rejected event yields no document).
+- [ ] **Step 3: Implement builders and glue; generate; run both suites until green.**
+- [ ] **Step 4: Commit** (`feat(n8n): office workflows, AI working day, shared intake, reconcile, maintenance`).
 
 ---
 
-### Task 7: n8n setup and live verification
+### Task 8: n8n setup and live verification
 
 **Files:**
-- Create: `scripts/burst_check.py`, `scripts/test_burst_check.py` (replaces the never-written corpus check)
+- Create: `scripts/burst_check.py`, `scripts/test_burst_check.py`
 
 **Interfaces:**
-- `burst_check.py --played N [--booth]` reads every office point and compares it with `expected_positions` for the first N script documents (plus the booth documents): lines, totals, counts, and `stage == 2` with a fresh summary. Pure core `burst_failures(expected, points) -> list[str]`.
+- `burst_check.py [--since ISO]` fetches `GET /webhook/issued` with the secret header, reads every office point, and compares points with `positions.expected_positions`: lines, totals, counts, `stage == 2`, a fresh summary, and each current document's amount equal to its issued amount. Pure core `burst_failures(expected, points) -> list[str]`.
 
-- [ ] **Step 1: Write and test `burst_check.py`** (failures for a wrong committed amount, a missing office, a wrong superseded count, a stale summary).
-- [ ] **Step 2: n8n Cloud setup (owner):** create the Data Tables `documents`, `offices`, `simulation` with the spec's columns plus `simulation.name`; create the `Dashboard secret` Header Auth credential; delete the old invoice workflows; import `03`, `02b`, `02`, `01b`, `01`, `06`, `00`, `05` in that order; select credentials, set `QDRANT_URL` where Config asks for it, select every Execute node's target; activate `01`, `00`, `05`, `06`.
-- [ ] **Step 3: One document.** Send `muc-po-2041-v1.pdf` with `curl` to `/webhook/send` with the secret header. Poll `python3 scripts/check_point.py m_anna munich --show stage,latest.stage,committed,lines.1.committed,summary_stage`. Expected: stage 0, then 1 with about 12.3, then 2 with 12300, then summary stage 3.
-- [ ] **Step 4: Duplicate and amendment.** Send `ber-po-1042-v1.pdf`, then `ber-po-1042-v1-copy.pdf` (answer `duplicate`), then `ber-po-1042-v2.pdf`. Expected on `m_anna/berlin`: `duplicate_count` 1, `superseded_count` 1, GPU committed at the version 2 amount, a rewritten summary.
-- [ ] **Step 5: Burst.** Reset (`POST /webhook/reset`), start a 10-document day, wait for it to finish, then `python3 scripts/burst_check.py --played 10` prints `BURST OK`.
-- [ ] **Step 6: Execution budget.** Count executions for one document in n8n's execution list and write the number and the plan's quota into the spec's section 5 note.
-- [ ] **Step 7: Commit** (`test: live burst check against the manifest`).
+- [ ] **Step 1: Write and test `burst_check.py`** (wrong amount, missing office, wrong superseded count, stale summary, extraction mismatch).
+- [ ] **Step 2: n8n Cloud setup (owner):** Data Tables `documents`, `offices`, `simulation`, `issued` with the spec's columns; credential `Dashboard secret`; delete the old invoice workflows; import `03`, `02b`, `02`, `01b`, `01`, `06`, `00`, `05`, `07`; bind credentials, `QDRANT_URL`, and Execute targets; activate `01`, `00`, `05`, `06`, `07`.
+- [ ] **Step 3: One document:** send `muc-po-2041-v1.pdf` to `/webhook/send`; poll `check_point.py m_anna munich`. Expected: stage 0, 1 with about 12.3, 2 with 12300, summary stage 3.
+- [ ] **Step 4: Booth beats:** send `ber-po-1042-v1.pdf`, then the copy (answer `duplicate`), then `ber-po-1042-v2.pdf`. Expected on `m_anna/berlin`: one duplicate, one superseded, GPU at the version 2 amount and over plan, a rewritten summary.
+- [ ] **Step 5: AI burst:** reset, start a 10-document day, wait for it, then `python3 scripts/burst_check.py` prints `BURST OK`. Open a few generated PDFs from the `issued` file names to check they read well.
+- [ ] **Step 6: Execution budget:** count executions for one document and for one burst; write both and the plan's quota into the spec's section 5.
+- [ ] **Step 7: Commit** (`test: live burst check against issued documents`).
 
 ---
 
-### Task 8: Dashboard foundation (Next.js)
+### Task 9: Dashboard foundation (Next.js)
 
 **Files:**
 - Create: `dashboard/` via `npx create-next-app@latest dashboard --ts --app --no-tailwind --no-src-dir --import-alias "@/*" --use-npm --eslint`, then add `vitest`
-- Create: `dashboard/lib/bodies.ts`, `lib/qdrant.ts`, `lib/shape.ts`, `lib/session.ts`, `lib/poll.ts`, `lib/ask.ts`, `lib/events.ts`, and a `*.test.ts` beside each
-- Create: `dashboard/app/api/offices/route.ts`, `api/ask/route.ts`, `api/send/route.ts`, `api/day/start/route.ts`, `api/day/stop/route.ts`, `api/reset/route.ts`, `api/login/route.ts`
+- Create: `dashboard/lib/{bodies,qdrant,shape,session,poll,ask,events}.ts` with a `*.test.ts` beside each
+- Create: `dashboard/app/api/{offices,ask,send,login,reset}/route.ts`, `dashboard/app/api/day/{start,stop}/route.ts`
 - Create: `dashboard/.env.local.example` (`QDRANT_URL`, `QDRANT_API_KEY`, `N8N_BASE_URL`, `N8N_DASHBOARD_SECRET`, `DASHBOARD_PASSCODE`, `SESSION_SECRET`)
 
 **Interfaces:**
 - `bodies.ts`: `officeList`, `officeScroll`, `askBatch` equal to `lib/reference-bodies.json` for the same arguments.
-- `shape.ts`: `toOfficeCard(point)`, `toLensResults(batchResponse, query) -> {keyword, line, meaning, fused}` (each a list of `{office_id, name, score, matched}`), `latestAcross(points)` for the band.
-- `events.ts`: `diffOffices(previous, next) -> Event[]` with kinds `received`, `stage`, `corrected`, `superseded`, `duplicate`, `summary`, `error`; the trigger list for every animation.
-- `poll.ts`: `createPoller({fetchOnce, intervalMs, onData, onError, now, setTimer})`: single-flight, next poll 2 s after settle, generation per manager and query, stale responses dropped, offline after 3 failures.
-- `ask.ts`: `normalizeQuery(text) -> string | null` (blank returns null; cut to 200 characters); `parseOver(text) -> number | null | "invalid"`.
-- `session.ts`: `signToken(secret, now)`, `verifyToken(secret, token, now)` (HMAC, 12-hour expiry); every API route except login returns 401 without a valid cookie.
-- API routes call Qdrant with `qdrant.ts` (server-only) and n8n with the secret header; responses are JSON with explicit error statuses.
+- `shape.ts`: `toOfficeCard(point)`, `toLensResults(batchResponse, query) -> {keyword, line, meaning, fused}` (lists of `{office_id, name, score, matched}`), `latestAcross(points)`.
+- `events.ts`: `diffOffices(previous, next) -> Event[]` with kinds `received`, `stage`, `corrected`, `superseded`, `duplicate`, `summary`, `error`.
+- `poll.ts`: `createPoller({fetchOnce, intervalMs, onData, onError, now, setTimer})`: single-flight, next poll 2 s after settle, generations per manager and query, stale responses dropped, offline after 3 failures.
+- `ask.ts`: `normalizeQuery(text) -> string | null`; `parseOver(text) -> number | null | "invalid"`.
+- `session.ts`: `signToken(secret, now)`, `verifyToken(secret, token, now)` (HMAC, 12-hour expiry); every route except login returns 401 without a valid cookie.
 
-- [ ] **Step 1: Scaffold and add Vitest** (`npm run test` runs `vitest run`).
-- [ ] **Step 2: Write the failing tests** for each lib: bodies equal the reference JSON; card shaping, including empty and partial points; lens shaping, including an empty lens; `diffOffices` on new document, stage up, amount corrected, superseded, duplicate, summary rewritten, error; poller single-flight, stale drop after a manager switch, offline after three failures; `normalizeQuery` blank, whitespace-only, and long input (Review Focus 5); `parseOver`; tokens valid, tampered, and expired.
-- [ ] **Step 3: Implement until green; implement the routes.** Check them with `curl` against the live cluster using a login cookie.
-- [ ] **Step 4: Commit** (`feat(dashboard): server routes, Qdrant reads, poller, and event diff`).
+- [ ] **Step 1: Scaffold; add Vitest** (`npm run test` runs `vitest run`).
+- [ ] **Step 2: Write the failing tests** for each lib, including `normalizeQuery` on blank, whitespace-only, and long input (Review Focus 5) and stale-response dropping after a manager switch.
+- [ ] **Step 3: Implement until green; implement the routes;** check them with `curl` against the live cluster using a login cookie.
+- [ ] **Step 4: Commit** (`feat(dashboard): server routes, Qdrant reads, poller, event diff`).
 
 ---
 
-### Task 9: Manager view
+### Task 10: Manager view
 
 **Files:**
-- Create: `dashboard/app/page.tsx`, `dashboard/app/globals.css` (tokens and components from prototype v3), `dashboard/components/{LatestBand,Tiles,AskPanel,LensColumns,Tape,OfficeCard,Meters,ShardSwap,PasscodeGate}.tsx`
+- Create: `dashboard/app/page.tsx`, `dashboard/app/globals.css` (prototype v3 tokens), `dashboard/components/{LatestBand,Tiles,AskPanel,LensColumns,Tape,OfficeCard,Meters,ShardSwap,PasscodeGate}.tsx`
 
-**Interfaces:**
-- Consumes the routes and libs from Task 8. Manager from `?manager=` (default `m_anna`).
-- Animations, each started by `diffOffices` events: document arrival and sharpening on the card and band, the amount correction tick, the strike-through and slide of a superseded figure with the summary rewriting, the duplicate stamp, the three lens beams fusing (on an Ask response), the cache counter ("model calls saved", "answered from memory in N ms"), the shard swap (manager switch). Reduced motion turns each into an instant change.
-
-- [ ] **Step 1:** Build the page with the band, tiles (committed against budget, lines over plan as a filter button, deals booked, summaries current), Ask with Keyword, Line, and Meaning columns plus the fused list, the tape, and office cards with per-category meters, superseded and duplicate counts, and the cached summary with its freshness. Each concept gets its one-sentence caption.
-- [ ] **Step 2:** Add the animations, driven only by events.
-- [ ] **Step 3: Check in the browser** against the live cluster after a short burst: a new document blurs and sharpens its card; the band shows rough then corrected; the duplicate stamp and the superseded slide appear for the booth documents; Ask "GPU servers for the inference launch" shows three different lens columns and Berlin first in the fused list; switching to Ben shows only West's offices. Screenshot each.
+- [ ] **Step 1:** Band, tiles (committed against budget, lines over plan as a filter, deals booked, summaries current), Ask with Keyword, Line, and Meaning columns and the fused list, tape, office cards with per-category meters, superseded and duplicate counts, and the cached summary with freshness; one-sentence caption per concept; the honest line about the AI workers.
+- [ ] **Step 2:** Animations driven only by `diffOffices` events: arrival and sharpening, the correction tick, the superseded strike and slide with the summary rewriting, the duplicate stamp, the lens beams fusing, the cache counter, the shard swap; reduced motion makes each instant.
+- [ ] **Step 3: Check in the browser** after a short burst and the booth beats; screenshot each moment.
 - [ ] **Step 4: Commit** (`feat(dashboard): manager view with lenses, tape, cards, and animations`).
 
 ---
 
-### Task 10: Console
+### Task 11: Console
 
 **Files:**
 - Create: `dashboard/app/console/page.tsx`, `dashboard/components/{SendPanel,DayControls,PipelineFlow,CollectionDisk}.tsx`
 
-**Interfaces:**
-- Send: a dropdown of the manifest's files (the booth documents first) calling `/api/send`; it shows `received` or `duplicate of …`.
-- Day: Start (count 12) and Stop calling `/api/day/start` and `/api/day/stop`; Reset behind a confirmation calling `/api/reset`.
-- `PipelineFlow`: the n8n nodes from prototype v3 with three intakes (Form, Console, Working day), driven by the latest document's observed stage changes from `diffOffices`; stages skipped between polls play quickly in order.
-- `CollectionDisk`: optional; cut first if time runs short.
-
-- [ ] **Step 1:** Build the page and wire the controls.
-- [ ] **Step 2:** Drive the pipeline animation from events.
-- [ ] **Step 3: Check in the browser:** send `muc-po-2041-v1.pdf` and watch every stage light and drop into Rebuild; start and stop a day; reset.
+- [ ] **Step 1:** Send (the static documents, booth beats first) with `received` or `duplicate of …`; Start (count 12) and Stop the day; Reset behind a confirmation.
+- [ ] **Step 2:** `PipelineFlow` with three intakes (Form, Console, AI workers) driven by the latest document's observed stage changes; skipped stages play quickly in order. `CollectionDisk` only if time allows.
+- [ ] **Step 3: Check in the browser:** a send lights every stage and drops into Rebuild; start, stop, reset.
 - [ ] **Step 4: Commit** (`feat(dashboard): console with send, working day, and the n8n pipeline`).
 
 ---
 
-### Task 11: README and booth materials
+### Task 12: README and booth materials
 
 **Files:**
 - Create: `README.md`, `booth/script.md`, `booth/cards.md`
 
-- [ ] **Step 1:** README in the spec's narrative arc (problem, failed fixes, the loop, why Qdrant, three fewer nodes, get it today), the positioning line, the minimal path (`01b`, `02`, `03`), setup (Qdrant collection script, n8n credentials, Data Tables, import order, the dashboard's environment), the request exhibit (`ask_batch` fused search), and known limits (the Line lens's matched line is word overlap; the rough read is naive on purpose; reconcile is eventual).
-- [ ] **Step 2:** `booth/script.md` with the spec's 60-second script and the pairing line; `booth/cards.md` with the request card and the QR card.
-- [ ] **Step 3: Check:** `grep -nE '—|seamless|powerful|robust|only Qdrant' README.md booth/*.md` finds nothing.
+- [ ] **Step 1:** README in the spec's narrative arc, with the positioning line, the minimal path (`01b`, `02`, `03`), setup (collection script, credentials, Data Tables, import order, dashboard environment), the request exhibit (the fused `ask_batch` search), the AI workers line, and known limits (Line lens matched line by word overlap; rough read naive on purpose; reconcile eventual).
+- [ ] **Step 2:** `booth/script.md` (60-second script, pairing line); `booth/cards.md` (request card, QR card).
+- [ ] **Step 3:** `grep -nE '—|seamless|powerful|robust|only Qdrant' README.md booth/*.md` finds nothing.
 - [ ] **Step 4: Commit** (`docs: README, booth script, and cards for Q8nten`).
 
 ---
 
-### Task 12 (gated by Task 5 Step 4): Page image vector
+### Task 13 (gated by Task 5 Step 4): Page image vector
 
-Skipped if the image gate failed. Otherwise: render each sample's page to PNG beside its PDF, add a 512-dimension `page` vector to the collection spec, have Rebuild embed the latest document's page image, add the Looks like lens to `ask_batch` and the dashboard, and extend the smoke test with one image upsert and query.
+Skipped if the gate failed. n8n Cloud cannot rasterize a PDF, so only the static booth documents carry a page image: render each static PDF's page to PNG in the repo (headless Chrome screenshot of the PDF), publish it beside the PDF, add a 512-dimension `page` vector to the collection spec, have Rebuild embed the latest static document's page image when one exists, add the Looks like lens to `ask_batch` and the dashboard, and extend the smoke test with one image upsert and query. The dashboard says plainly that page images exist for the booth documents only.
 
 ---
 
-### Task 13: Rehearsal
+### Task 14: Rehearsal
 
-- [ ] **Step 1:** Reset, play a 12-document seed day, then run the booth script three times, timing each. Record times and stage timings in `booth/rehearsal.md`.
-- [ ] **Step 2:** Warm-up checklist in `booth/rehearsal.md`: unit suites green, smoke passes, burst check passes, one warm-up document, both screens logged in, hotspot tested.
+- [ ] **Step 1:** Reset, send `ber-po-1042-v1.pdf`, play a 12-document AI day, then the booth script three times, timed; record in `booth/rehearsal.md`.
+- [ ] **Step 2:** Warm-up checklist in `booth/rehearsal.md`: suites green, smoke and burst checks pass, one warm-up document, both screens logged in, hotspot tested.
 - [ ] **Step 3: Commit** (`docs: rehearsal timings and warm-up checklist`).

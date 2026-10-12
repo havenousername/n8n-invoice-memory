@@ -63,9 +63,10 @@ Success at the booth:
 - **Amendment:** the same key with a higher version, printed as "Version 2 (ersetzt Version 1)". The highest version present is current; older versions are superseded, kept, and counted, never summed.
 - **Duplicate:** a byte-identical copy of a document already received, for example the same file arriving by email and portal.
 
-**Pool and script.** `samples/` holds about 36 documents across the six offices, including at least three amendments, two duplicates, and enough costs to push two offices over plan in at least one category. `samples/manifest.json` lists every file with its office, controller, expected fields, and its place in the scripted working day. The file determines the office and controller; nobody picks a worker. File names are `<office>-<key>-v<version>.pdf`, for example `muc-po-2041-v1.pdf`; a duplicate is `<original name>-copy.pdf`, byte-identical to the original.
-
-The pool reserves three documents for the booth beats, outside the simulator's script: `muc-po-2041-v1.pdf` (Hetzner, Cloud infrastructure, 12.300,00 €), `ber-po-1042-v1-copy.pdf` (a duplicate of a scripted document), and `ber-po-1042-v2.pdf` (an amendment raising that commitment).
+**Where documents come from.**
+- **AI workers.** `00 Working day` plays the controllers. For each document it picks an office, shows the model that office's recent documents, and asks for the next business event under a strict schema: a new commitment, deal, or credit note, an amendment of one of the listed recent keys, or a resend of one of them. The model writes the counterparty, category, amount, and the German and English descriptions; code assigns keys and versions, checks every value against the office's budget and the categories, and renders the PDF. Rendering is deterministic, so a resend is byte-identical and the duplicate check catches it for real. Every issued document is logged in `issued`, the ground truth for verification. Said at the booth: the workers are simulated by an AI; in real life these documents come from people and suppliers.
+- **Booth documents.** Four static PDFs for beats that must land every time: `ber-po-1042-v1.pdf` (GPU servers, sent before the booth beats), `muc-po-2041-v1.pdf` (Hetzner, Cloud infrastructure, 12.300,00 €), `ber-po-1042-v1-copy.pdf` (byte-identical duplicate), and `ber-po-1042-v2.pdf` (an amendment raising the GPU servers so Berlin goes over plan in GPU compute). Two more static PDFs, one deal and one credit note, exist only for the extraction gate.
+- **One renderer.** A small PDF writer (`workflows/code/pdf.js`) renders both the AI workers' documents inside n8n and the static PDFs in the repo, so every document looks the same. File names are `<office>-<key>-v<version>.pdf`; a resend keeps its original name with `-copy`.
 
 ## 3. Data
 
@@ -75,7 +76,11 @@ Two Data Tables are the source of truth; Qdrant holds a view rebuilt from them.
 
 **`offices`**: `office_id`, `manager_id`, `name`, `narrative`, `narrative_at` (date), `narrative_revision`.
 
-**`simulation`** (one row): `cursor` (number), `running` (boolean).
+**`simulation`** (one row, `name` = `day`): `running` (boolean).
+
+**`issued`** (one row per document an AI worker issued): `issued_id`, `office_id`, `manager_id`, `worker_id`, `doc_type`, `doc_key`, `version`, `date`, `counterparty`, `category`, `amount`, `description_de`, `description_en`, `resend_of`, `filename`, `issued_at`. Ground truth for the burst check; the pipeline never reads it.
+
+Every `documents` row also stores `pdf_base64`: the file is read from the row, never downloaded twice, whatever its source.
 
 ## 4. Qdrant
 
@@ -123,13 +128,14 @@ Generated as importable JSON by `scripts/build_workflows.py`, as today: no insta
 
 | Workflow | Change |
 |---|---|
-| `00 Working day` (new) | Started by the console. Responds at once, sets `running` to true, reads the cursor, takes the next N script entries, and for each one checks `running`, hands the file to `01b`, advances the cursor, and waits about 15 s. Ends with one `06 Reconcile`. One execution per burst. |
-| `01b Record a document` (new, shared) | Input: a file name. Validates it against the manifest (which gives office, manager, controller), downloads, hashes, and checks the hash per manager and office. A duplicate appends a `duplicate` row and rebuilds the office; a new document upserts the office row, appends the document row, starts `02` without waiting, and answers with its ids. |
+| `00 Working day` (new) | Started by the console with a count. Responds at once, sets `running`, and for each slot: checks `running`, picks an office, reads its recent issued documents, asks the model for the next event, validates it and assigns key and version in code, renders the PDF, logs it in `issued`, hands it to `01b`, and waits about 15 s. Ends with one `06 Reconcile`. One execution per burst. |
+| `01b Record a document` (new, shared) | Input: either a static `file` (Form, console) or a generated `filename` with `pdf_base64`, `office_id`, and `worker_id` (only from `00`). A static file is validated against the booth manifest and downloaded. Then it hashes, checks the hash per manager and office, and stores the PDF in the row. A duplicate appends a `duplicate` row and rebuilds the office; a new document upserts the office row, appends the document row, starts `02` without waiting, and answers with its ids. |
 | `01 Ingest` | The phone Form, reduced to Form, `01b`, and a Duplicate or Received page. One dropdown: the document pool. |
-| `02 Process` | Same stages and error routing. The rough read parses the German labels and converts the date; it misreads every German amount by a factor of 1,000, on purpose. The vision read uses a strict schema: `doc_type`, `doc_key`, `version`, `office`, `date`, `counterparty`, `category` (one of five, or none for deals), `amount`, `description_en`. Validation checks each field. |
+| `02 Process` | Same stages and error routing; the PDF comes from the row's `pdf_base64`. The rough read parses the German labels and converts the date; it misreads every German amount by a factor of 1,000, on purpose. The vision read uses a strict schema: `doc_type`, `doc_key`, `version`, `office`, `date`, `counterparty`, `category` (one of five, or none for deals), `amount`, `description_en`. Validation checks each field. |
 | `02b Write the summary` | Three sentences about the office's budget position: committed against budget, categories over plan, deals booked, and the most recent change, including amendments. Same freshness rule and fingerprint. |
 | `03 Rebuild office point` | Same shape. The view takes the highest version of each key as current, counts superseded and duplicate rows without summing them, sums current costs and credit notes per category against the budget, sums current deals, and computes the stage, latest document, and summary freshness. |
-| `05 Dashboard writes` | `POST /send` (file) to `01b`, answering with its JSON; `POST /day/stop` sets `running` to false; `POST /reset` clears the `documents` and `offices` rows, resets the simulation, and deletes the office points (used between rehearsals). `POST /day/start` belongs to `00`. Every webhook requires the dashboard's secret header. |
+| `05 Dashboard writes` | `POST /send` (a static file) to `01b`, answering with its JSON; `POST /day/stop` sets `running` to false. `POST /day/start` belongs to `00`. Every webhook requires the dashboard's secret header. |
+| `07 Maintenance` (new) | `POST /reset` clears `documents`, `offices`, and `issued`, stops the day, and deletes the office points (between rehearsals). `GET /issued` returns the issued rows for the burst check. Secret header required. |
 | `06 Reconcile` (new) | Every 5 minutes and at the end of each burst, rebuilds all six office points from the tables, so a view written out of order by overlapping runs is replaced within minutes. |
 
 Removed: `04 Dashboard reads` (the dashboard reads Qdrant directly), remove and restore, and `06 Purge`.
@@ -190,7 +196,8 @@ Each concept gets one plain sentence on screen next to its animation.
 ## 8. Verification
 
 - Unit tests: rough read (German labels, dates, the ×1000 misread), validation of the new schema, the office view (versions, superseded, duplicates, budgets, over plan), card and lens shaping, manifest invariants, generated workflow structure, and each Code node run in the sandbox harness.
-- Live gates, in order: the OpenRouter check on one purchase commitment, one deal, and one credit note (all fields, English description, amount corrected); the smoke test on a disposable `offices`-shaped collection including the over-plan filter and the four-search batch; a 10-document burst whose resulting points match expectations computed from the manifest (a rewritten corpus check).
+- The PDF writer: deterministic bytes, German characters, and text that `pdftotext` and n8n's Extract from File both read back.
+- Live gates, in order: the OpenRouter check on one purchase commitment, one deal, and one credit note rendered by the writer (all fields, English description, amount corrected); the smoke test on a disposable `offices`-shaped collection including the over-plan filter and the four-search batch; a 10-document AI-worker burst whose resulting points match expectations computed from the `issued` rows (the burst check).
 - Rehearsal: reset, seed burst, then the 60-second script three times.
 
 ## 9. Build order and cuts
@@ -201,7 +208,7 @@ Cut first if time runs short: the `page` vector (if its gate fails it is cut any
 
 ## 10. Booth script
 
-1. Start the working day. Cards update as documents arrive; each amount appears rough, then corrected.
+1. Start the working day (`ber-po-1042-v1.pdf` was sent at setup). Cards update as the AI workers' documents arrive; each amount appears rough, then corrected.
 2. Send `muc-po-2041-v1.pdf` by hand: rough €12.30 becomes €12,300.00.
 3. Send `ber-po-1042-v1-copy.pdf`: "Duplicate, nothing ingested", shown on the tape.
 4. Send `ber-po-1042-v2.pdf`: version 1 is marked superseded, Berlin's category total changes, the summary is rewritten.
