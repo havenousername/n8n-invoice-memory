@@ -1,0 +1,194 @@
+{
+ "issued_rows": [
+  {
+   "office_id": "berlin",
+   "doc_type": "cost",
+   "doc_key": "PO-5000",
+   "version": 1,
+   "category": "gpu",
+   "amount": 48000,
+   "resend_of": null,
+   "issued_at": "2026-10-12T09:01:00Z"
+  },
+  {
+   "office_id": "berlin",
+   "doc_type": "cost",
+   "doc_key": "PO-5001",
+   "version": 1,
+   "category": "cloud",
+   "amount": 20000,
+   "resend_of": null,
+   "issued_at": "2026-10-12T09:02:00Z"
+  },
+  {
+   "office_id": "berlin",
+   "doc_type": "deal",
+   "doc_key": "DEAL-6000",
+   "version": 1,
+   "category": null,
+   "amount": 300000,
+   "resend_of": null,
+   "issued_at": "2026-10-12T09:03:00Z"
+  },
+  {
+   "office_id": "berlin",
+   "doc_type": "credit",
+   "doc_key": "CN-7000",
+   "version": 1,
+   "category": "cloud",
+   "amount": 25000,
+   "resend_of": null,
+   "issued_at": "2026-10-12T09:04:00Z"
+  },
+  {
+   "office_id": "berlin",
+   "doc_type": "cost",
+   "doc_key": "PO-5001",
+   "version": 1,
+   "category": "cloud",
+   "amount": 20000,
+   "resend_of": "ber-po-5001-v1.pdf",
+   "issued_at": "2026-10-12T09:05:00Z"
+  },
+  {
+   "office_id": "berlin",
+   "doc_type": "cost",
+   "doc_key": "PO-5000",
+   "version": 2,
+   "category": "gpu",
+   "amount": 132000,
+   "resend_of": null,
+   "issued_at": "2026-10-12T09:06:00Z"
+  },
+  {
+   "office_id": "paris",
+   "doc_type": "cost",
+   "doc_key": "PO-5002",
+   "version": 1,
+   "category": "travel",
+   "amount": 80000,
+   "resend_of": null,
+   "issued_at": "2026-10-12T09:07:00Z"
+  },
+  {
+   "office_id": "paris",
+   "doc_type": "deal",
+   "doc_key": "DEAL-6001",
+   "version": 1,
+   "category": null,
+   "amount": 50000,
+   "resend_of": null,
+   "issued_at": "2026-10-12T09:08:00Z"
+  }
+ ],
+ "offices": [
+  {
+   "office_id": "berlin",
+   "budgets": {
+    "people": 820000,
+    "cloud": 180000,
+    "gpu": 120000,
+    "office": 95000,
+    "travel": 60000
+   }
+  },
+  {
+   "office_id": "paris",
+   "budgets": {
+    "people": 700000,
+    "cloud": 120000,
+    "gpu": 140000,
+    "office": 110000,
+    "travel": 70000
+   }
+  }
+ ],
+ "expected": {
+  "berlin": {
+   "lines": {
+    "people": {
+     "budget": 820000,
+     "committed": 0.0,
+     "credited": 0.0,
+     "remaining": 820000.0,
+     "over_by": 0.0
+    },
+    "cloud": {
+     "budget": 180000,
+     "committed": 0.0,
+     "credited": 25000.0,
+     "remaining": 180000.0,
+     "over_by": 0.0
+    },
+    "gpu": {
+     "budget": 120000,
+     "committed": 132000.0,
+     "credited": 0.0,
+     "remaining": -12000.0,
+     "over_by": 12000.0
+    },
+    "office": {
+     "budget": 95000,
+     "committed": 0.0,
+     "credited": 0.0,
+     "remaining": 95000.0,
+     "over_by": 0.0
+    },
+    "travel": {
+     "budget": 60000,
+     "committed": 0.0,
+     "credited": 0.0,
+     "remaining": 60000.0,
+     "over_by": 0.0
+    }
+   },
+   "booked": 300000.0,
+   "deal_count": 1,
+   "superseded_count": 1,
+   "duplicate_count": 1
+  },
+  "paris": {
+   "lines": {
+    "people": {
+     "budget": 700000,
+     "committed": 0.0,
+     "credited": 0.0,
+     "remaining": 700000.0,
+     "over_by": 0.0
+    },
+    "cloud": {
+     "budget": 120000,
+     "committed": 0.0,
+     "credited": 0.0,
+     "remaining": 120000.0,
+     "over_by": 0.0
+    },
+    "gpu": {
+     "budget": 140000,
+     "committed": 0.0,
+     "credited": 0.0,
+     "remaining": 140000.0,
+     "over_by": 0.0
+    },
+    "office": {
+     "budget": 110000,
+     "committed": 0.0,
+     "credited": 0.0,
+     "remaining": 110000.0,
+     "over_by": 0.0
+    },
+    "travel": {
+     "budget": 70000,
+     "committed": 80000.0,
+     "credited": 0.0,
+     "remaining": -10000.0,
+     "over_by": 10000.0
+    }
+   },
+   "booked": 50000.0,
+   "deal_count": 1,
+   "superseded_count": 0,
+   "duplicate_count": 0
+  }
+ }
+}
