@@ -1,6 +1,6 @@
-"""OpenRouter gate: can the pinned model read one invoice PDF and answer in bare JSON?
+"""OpenRouter gate: can the pinned model read one German office document PDF and answer in bare JSON?
 
-Acceptance script: it sends one synthetic sample from samples/ to OpenRouter. Real invoices are refused.
+Acceptance script: it sends one synthetic sample from samples/ to OpenRouter. Real documents are refused.
 """
 
 import argparse
@@ -16,27 +16,34 @@ from transport import HttpError, TransportError, send
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
 REQUIRED_FIELDS = (
-    "invoice_no", "date", "due_date", "amount", "vendor", "customer_name", "status", "line_items_summary",
+    "doc_type", "doc_key", "version", "cost_center", "date", "counterparty", "category", "amount", "description_en",
 )
 # Task 7's vision node sends this exact prompt.
 SYSTEM_PROMPT = (
-    "You read one invoice PDF and return JSON only with keys: invoice_no, date (YYYY-MM-DD), "
-    "due_date (YYYY-MM-DD), amount (number in EUR, no thousands separators), vendor, customer_name, "
-    "status (one of: open, paid, overdue), line_items_summary (max 12 words)."
+    "You read one German business document of Q8nten GmbH: a Bestellung (purchase commitment), a Kundenauftrag "
+    "(client deal), or a Gutschrift (credit note). Return JSON only with these keys: doc_type (cost for Bestellung, "
+    "deal for Kundenauftrag, credit for Gutschrift), doc_key (the Belegnummer, for example PO-1042), version (the "
+    "integer after Version), cost_center (the Kostenstelle, for example CC-BER-01), date (Datum, written DD.MM.YYYY "
+    "in the document, returned as YYYY-MM-DD), counterparty (the Lieferant or Kunde), category (people for Personal, "
+    "cloud for Cloud-Infrastruktur, gpu for GPU-Rechenleistung, office for Büro und Ausstattung, travel for Reisen "
+    "und Events, none for a Kundenauftrag), amount (Betrag or Auftragswert as a number: German format uses dots for "
+    "thousands and a comma for decimals, so 12.300,00 € is 12300), description_en (the Beschreibung translated to "
+    "one English sentence)."
 )
 
 
-def invoice_schema() -> dict:
-    """Strict JSON schema for the reply. json_object alone let Haiku 5.5 wrap its JSON in a code fence."""
+def document_schema() -> dict:
+    """Strict JSON schema for the reply. json_object alone let the model wrap its JSON in a code fence."""
     properties = {
-        "invoice_no": {"type": "string"},
-        "date": {"type": "string", "description": "YYYY-MM-DD"},
-        "due_date": {"type": "string", "description": "YYYY-MM-DD"},
-        "amount": {"type": "number", "description": "total in EUR"},
-        "vendor": {"type": "string"},
-        "customer_name": {"type": "string"},
-        "status": {"type": "string", "enum": ["open", "paid", "overdue"]},
-        "line_items_summary": {"type": "string", "description": "max 12 words"},
+        "doc_type": {"type": "string", "enum": ["cost", "deal", "credit"]},
+        "doc_key": {"type": "string", "description": "Belegnummer, for example PO-1042"},
+        "version": {"type": "integer"},
+        "cost_center": {"type": "string", "description": "Kostenstelle, for example CC-BER-01"},
+        "date": {"type": "string", "description": "YYYY-MM-DD, converted from the German DD.MM.YYYY"},
+        "counterparty": {"type": "string"},
+        "category": {"type": "string", "enum": ["people", "cloud", "gpu", "office", "travel", "none"]},
+        "amount": {"type": "number", "description": "EUR as a plain number, converted from German format"},
+        "description_en": {"type": "string", "description": "the Beschreibung as one English sentence"},
     }
     return {"type": "object", "properties": properties, "required": list(REQUIRED_FIELDS), "additionalProperties": False}
 
@@ -57,14 +64,14 @@ def extraction_body(pdf: bytes, model: str, engine: str) -> dict:
         "max_tokens": 400,
         "response_format": {
             "type": "json_schema",
-            "json_schema": {"name": "invoice", "strict": True, "schema": invoice_schema()},
+            "json_schema": {"name": "office_document", "strict": True, "schema": document_schema()},
         },
         "plugins": [{"id": "file-parser", "pdf": {"engine": engine}}],
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [
                 {"type": "text", "text": "Extract the fields."},
-                {"type": "file", "file": {"filename": "invoice.pdf", "file_data": data_url}},
+                {"type": "file", "file": {"filename": "document.pdf", "file_data": data_url}},
             ]},
         ],
     }
@@ -96,7 +103,7 @@ def require_synthetic(path: Path, samples_dir: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("pdf", type=Path, help="a sample PDF, for example samples/acme-001.pdf")
+    parser.add_argument("pdf", type=Path, help="a sample PDF, for example samples/muc-po-2041-v1.pdf")
     args = parser.parse_args(argv)
     try:
         settings = load_settings(["OPENROUTER_API_KEY", "OPENROUTER_MODEL"])

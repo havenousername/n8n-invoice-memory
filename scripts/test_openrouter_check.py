@@ -4,13 +4,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from openrouter_check import REQUIRED_FIELDS, ExtractionError, extraction_body, parse_reply, require_synthetic
+from openrouter_check import (
+    REQUIRED_FIELDS, SYSTEM_PROMPT, ExtractionError, document_schema, extraction_body, parse_reply, require_synthetic,
+)
 
-PDF = b"%PDF-1.4 synthetic invoice"
+PDF = b"%PDF-1.4 synthetic document"
 GOOD = {
-    "invoice_no": "INV-4711", "date": "2026-09-01", "due_date": "2026-09-15", "amount": 12300,
-    "vendor": "Hetzner Online GmbH", "customer_name": "Acme GmbH", "status": "overdue",
-    "line_items_summary": "Hetzner servers, rack 12",
+    "doc_type": "cost", "doc_key": "PO-2041", "version": 1, "cost_center": "CC-MUC-01", "date": "2026-10-08",
+    "counterparty": "Hetzner Online GmbH", "category": "cloud", "amount": 12300,
+    "description_en": "Dedicated servers for the staging environment, October",
 }
 
 
@@ -37,12 +39,17 @@ class ExtractionBodyTest(unittest.TestCase):
         self.assertEqual(schema["required"], list(REQUIRED_FIELDS))
         self.assertEqual(set(schema["properties"]), set(REQUIRED_FIELDS))
         self.assertFalse(schema["additionalProperties"])
-        self.assertEqual(schema["properties"]["amount"], {"type": "number", "description": "total in EUR"})
-        self.assertEqual(schema["properties"]["status"]["enum"], ["open", "paid", "overdue"])
+        self.assertEqual(schema["properties"]["doc_type"]["enum"], ["cost", "deal", "credit"])
+        self.assertEqual(schema["properties"]["category"]["enum"], ["people", "cloud", "gpu", "office", "travel", "none"])
+        self.assertEqual(schema["properties"]["version"]["type"], "integer")
+        self.assertEqual(schema["properties"]["amount"]["type"], "number")
+        self.assertIn("YYYY-MM-DD", schema["properties"]["date"]["description"])
+        self.assertIn("English", schema["properties"]["description_en"]["description"])
+        self.assertEqual(schema, document_schema())
 
     def test_each_body_gets_its_own_schema(self):
         extraction_body(PDF, "m", "native")["response_format"]["json_schema"]["schema"]["required"].clear()
-        self.assertEqual(len(self.body["response_format"]["json_schema"]["schema"]["required"]), 8)
+        self.assertEqual(len(self.body["response_format"]["json_schema"]["schema"]["required"]), 9)
 
     def test_engine_is_passed_through(self):
         body = extraction_body(PDF, "m", "pdf-text")
@@ -61,6 +68,10 @@ class ExtractionBodyTest(unittest.TestCase):
         self.assertEqual(system["role"], "system")
         for field in REQUIRED_FIELDS:
             self.assertIn(field, system["content"])
+
+    def test_system_prompt_explains_the_german_document(self):
+        for phrase in ("Q8nten GmbH", "German", "12.300,00", "DD.MM.YYYY", "none", "English"):
+            self.assertIn(phrase, SYSTEM_PROMPT)
 
 
 class ParseReplyTest(unittest.TestCase):
@@ -84,8 +95,8 @@ class ParseReplyTest(unittest.TestCase):
             parse_reply(reply("[1, 2]"))
 
     def test_names_every_missing_field(self):
-        partial = {k: v for k, v in GOOD.items() if k not in ("vendor", "due_date")}
-        with self.assertRaisesRegex(ExtractionError, "due_date, vendor"):
+        partial = {k: v for k, v in GOOD.items() if k not in ("cost_center", "description_en")}
+        with self.assertRaisesRegex(ExtractionError, "cost_center, description_en"):
             parse_reply(reply(json.dumps(partial)))
 
 
@@ -96,23 +107,23 @@ class RequireSyntheticTest(unittest.TestCase):
         self.root = Path(directory.name)
         self.samples = self.root / "samples"
         self.samples.mkdir()
-        (self.samples / "acme-001.pdf").write_bytes(PDF)
-        (self.root / "real-invoice.pdf").write_bytes(PDF)
+        (self.samples / "muc-po-2041-v1.pdf").write_bytes(PDF)
+        (self.root / "real-document.pdf").write_bytes(PDF)
 
     def test_accepts_a_sample(self):
-        path = require_synthetic(self.samples / "acme-001.pdf", self.samples)
-        self.assertEqual(path, (self.samples / "acme-001.pdf").resolve())
+        path = require_synthetic(self.samples / "muc-po-2041-v1.pdf", self.samples)
+        self.assertEqual(path, (self.samples / "muc-po-2041-v1.pdf").resolve())
 
     def test_rejects_a_pdf_outside_samples(self):
         with self.assertRaises(ValueError):
-            require_synthetic(self.root / "real-invoice.pdf", self.samples)
+            require_synthetic(self.root / "real-document.pdf", self.samples)
 
     def test_rejects_a_dotdot_escape(self):
         with self.assertRaises(ValueError):
-            require_synthetic(self.samples / ".." / "real-invoice.pdf", self.samples)
+            require_synthetic(self.samples / ".." / "real-document.pdf", self.samples)
 
     def test_rejects_a_symlink_that_points_outside(self):
-        (self.samples / "link.pdf").symlink_to(self.root / "real-invoice.pdf")
+        (self.samples / "link.pdf").symlink_to(self.root / "real-document.pdf")
         with self.assertRaises(ValueError):
             require_synthetic(self.samples / "link.pdf", self.samples)
 
