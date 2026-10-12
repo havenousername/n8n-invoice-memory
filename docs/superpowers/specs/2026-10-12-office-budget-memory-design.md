@@ -207,3 +207,25 @@ Cut first if time runs short: the `page` vector (if its gate fails it is cut any
 6. Switch from Anna to Ben: only West's offices.
 
 Close: "Not chunks, memory. n8n does the handling, Qdrant keeps the memory. The request is on the card."
+
+## 11. Alignment with Clelia's talk
+
+Clelia's stage talk, *Building a Self-Healing Research Agent in n8n*, writes a human's verdict back to one Qdrant collection so an agent does not make the same mistake twice. The booth is its companion at company scale.
+
+**The pairing, said once at the booth:** "Clelia's agent learns from corrections. This memory learns from every document. Same collection, same loop, at scale."
+
+**Narrative arc**, borrowed from her deck and used in the README, the console captions, and the printed card:
+1. Problem: documents arrive duplicated, outdated, and in German, all day long.
+2. Common fixes that fail: re-reading everything costs a model call per question; chunk-and-hope loses the facts that matter.
+3. The loop: one living point per office, rebuilt after every stage and every document.
+4. Why Qdrant: three meanings in one request, filtered per tenant.
+5. Three fewer nodes: Cloud Inference embeds inside the cluster, where her talk removed one.
+6. Get it today: importable workflows, a README, Apache 2.0.
+
+**Shared vocabulary**, used on purpose so the two read as a pair: "one collection, many lanes" (tenants as shards, three representation lanes); "doubles as an audit trail" (her "doubles as an eval set"; our superseded and duplicate history); "three fewer nodes" (her "one fewer node").
+
+**Minimal path in the README**, before the full company setup: `01b`, `02`, and `03` alone give a builder a living point per entity, the way her repo starts from one eleven-node workflow.
+
+**Deferred:**
+- A human correction (a manager flags a wrong field or summary on a card; the rebuild applies the correction over the extraction) would make her loop literal for documents. It is built only after the core demo runs end to end.
+- Renaming the repo to fit the new domain.
