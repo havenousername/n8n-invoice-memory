@@ -14,6 +14,8 @@ A visitor leaves with three answers:
 2. **Why Qdrant.** One point carries three vector representations with different meanings: exact words and codes, single document lines, and the office's overall situation. The dashboard shows each one's answer and the fused answer from one request.
 3. **The feature.** Caching and handling documents in a multi-tenant, high-volume setting where information arrives duplicated, goes out of date, and needs constant upkeep. Expensive reading happens once per document; every question after that is answered from the point in milliseconds, with no model call.
 
+**The position, in one line:** everything the company knows about an office lives in one place, one point, instead of being spread across a collection of chunks. Duplicates, outdated figures, and aggregation are settled once, when the point is rebuilt, not by every question at query time.
+
 **What is new, said so it survives scrutiny.** Most document demos cut files into chunks and retrieve chunks. Here each office is one living point, a pattern the booth calls *progressive entity memory*:
 - the point improves as each document is read (rough, then sharp, then summarized) and is served at every stage;
 - it rewrites its own summary when its facts change (the revision fingerprint is the cache invalidation);
