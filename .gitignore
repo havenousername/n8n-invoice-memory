@@ -6,3 +6,6 @@ node_modules/
 __pycache__/
 edge/data/
 .DS_Store
+.agents/
+.claude/skills/
+skills-lock.json
