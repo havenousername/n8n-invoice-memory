@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const SOURCES = ['ids', 'coarse', 'validate', 'office-view', 'pdf'];
+const SOURCES = ['ids', 'coarse', 'validate', 'office-view', 'pdf', 'worker'];
 const pasted = (name) => fs.readFileSync(path.join(__dirname, `${name}.js`), 'utf8').replace(/^module\.exports.*$/m, '');
 
 for (const name of SOURCES) {
