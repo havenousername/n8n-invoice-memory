@@ -9,3 +9,4 @@ edge/data/
 .agents/
 .claude/skills/
 skills-lock.json
+.superpowers/
