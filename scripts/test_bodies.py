@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -119,7 +121,8 @@ class ReferenceJsonTest(unittest.TestCase):
     def test_json_flag_writes_the_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "lib" / "reference-bodies.json"
-            self.assertEqual(main(["--json", str(out)]), 0)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["--json", str(out)]), 0)
             self.assertEqual(json.loads(out.read_text()), reference_cases())
 
 
