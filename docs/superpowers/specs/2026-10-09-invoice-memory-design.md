@@ -1,3 +1,5 @@
+> **Superseded on 2026-10-12** by `2026-10-12-office-budget-memory-design.md` (office budgets instead of invoices). The pipeline, staging, rebuild, and tenancy decisions here still apply where that document does not replace them.
+
 # Invoice Memory: progressive per-customer memory in Qdrant, driven by n8n
 
 Booth demo for n8n In The Loop 2026, Ecosystem Day, Berlin, 2026-10-14. Qdrant booth. Complements Clelia's stage talk "Building a Self-Healing Research Agent in n8n" (her loop: feedback → memory; this: events → memory).
