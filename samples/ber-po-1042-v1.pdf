@@ -1,0 +1,49 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 818 >>
+stream
+BT /F2 13 Tf 56 790 Td (Q8nten GmbH) Tj ET
+BT /F2 22 Tf 56 750 Td (BESTELLUNG) Tj ET
+0.85 0.14 0.30 RG 1.5 w 56 735 m 539 735 l S
+BT /F1 11 Tf 56 700 Td (Belegnummer: PO-1042) Tj ET
+BT /F1 11 Tf 56 681 Td (Version: 1) Tj ET
+BT /F1 11 Tf 56 662 Td (Datum: 06.10.2026) Tj ET
+BT /F1 11 Tf 56 643 Td (Kostenstelle: CC-BER-01) Tj ET
+BT /F1 11 Tf 56 624 Td (Standort: Berlin) Tj ET
+BT /F1 11 Tf 56 605 Td (Lieferant: Rechenwerk Systems GmbH) Tj ET
+BT /F1 11 Tf 56 586 Td (Kategorie: GPU-Rechenleistung) Tj ET
+BT /F1 11 Tf 56 567 Td (Beschreibung: GPU-Server \(4x\) f\374r den Inferenz-Launch, Anzahlung) Tj ET
+BT /F2 14 Tf 56 538 Td (Betrag: 48.000,00 \200) Tj ET
+BT /F1 11 Tf 56 512 Td (Eingereicht von: Tom) Tj ET
+BT /F1 8 Tf 56 60 Td (Synthetischer Beleg f\374r eine Demo. Keine echte Firma, keine echte Forderung.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000251 00000 n 
+0000001120 00000 n 
+0000001217 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1319
+%%EOF
