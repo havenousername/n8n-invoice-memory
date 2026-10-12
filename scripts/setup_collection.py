@@ -1,4 +1,4 @@
-"""Create the customers collection, or verify an existing one, with its shard keys and payload indexes.
+"""Create the offices collection, or verify an existing one, with its shard keys and payload indexes.
 
 Acceptance script: it writes to the live cluster named in .env. Safe to rerun.
 """

@@ -1,11 +1,11 @@
-"""Read one customer's Qdrant point and print it, or check fields on it.
+"""Read one office's Qdrant point and print it, or check fields on it.
 
 Acceptance script: it reads the live collection in .env. Exit 0 when every expectation holds,
 1 when one fails or the cluster can't be read, 2 when the point does not exist.
 
-  python3 scripts/check_point.py m_anna acme
-  python3 scripts/check_point.py m_anna acme --show stage,latest.amount
-  python3 scripts/check_point.py m_anna acme --expect stage=1 --expect worker_id=w_tom --absent deleted_at
+  python3 scripts/check_point.py m_anna berlin
+  python3 scripts/check_point.py m_anna berlin --show stage,latest.amount,lines.2.over_by
+  python3 scripts/check_point.py m_anna berlin --expect stage=2 --expect duplicate_count=1 --present summary_text
 """
 
 import argparse
@@ -24,7 +24,7 @@ _MISSING = object()
 
 
 def get_path(payload: Any, path: str) -> Any:
-    """Follow a dot path; integer segments index lists (`invoices.0.error`)."""
+    """Follow a dot path; integer segments index lists (`documents.0.error`)."""
     current = payload
     for segment in path.split("."):
         if isinstance(current, dict) and segment in current:
@@ -80,7 +80,7 @@ def _lookup(payload: dict, path: str) -> Any:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("manager")
-    parser.add_argument("customer")
+    parser.add_argument("office")
     parser.add_argument("--show", default="", help="comma-separated paths to print as path=value")
     parser.add_argument("--expect", action="append", default=[], metavar="PATH=VALUE")
     parser.add_argument("--present", action="append", default=[], metavar="PATH")
@@ -93,12 +93,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         call = connect(load_settings(["QDRANT_URL", "QDRANT_API_KEY"]))
         points = call("POST", f"/collections/{COLLECTION}/points/scroll",
-                      bodies.customer_scroll(args.manager, args.customer))["points"]
+                      bodies.office_scroll(args.manager, args.office))["points"]
     except (InvalidEnvFile, MissingSetting, HttpError, TransportError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     if not points:
-        print(f"no point for {args.manager}/{args.customer}", file=sys.stderr)
+        print(f"no point for {args.manager}/{args.office}", file=sys.stderr)
         return 2
     payload = points[0]["payload"]
     shown = [path for path in args.show.split(",") if path]

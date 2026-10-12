@@ -1,0 +1,695 @@
+{
+ "office_list": [
+  {
+   "args": [
+    "m_anna",
+    null,
+    50
+   ],
+   "body": {
+    "shard_key": "m_anna",
+    "limit": 50,
+    "with_payload": true,
+    "order_by": {
+     "key": "updated_at",
+     "direction": "desc"
+    },
+    "filter": {
+     "must": [
+      {
+       "key": "manager_id",
+       "match": {
+        "value": "m_anna"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "args": [
+    "m_anna",
+    1000,
+    50
+   ],
+   "body": {
+    "shard_key": "m_anna",
+    "limit": 50,
+    "with_payload": true,
+    "order_by": {
+     "key": "updated_at",
+     "direction": "desc"
+    },
+    "filter": {
+     "must": [
+      {
+       "key": "manager_id",
+       "match": {
+        "value": "m_anna"
+       }
+      },
+      {
+       "nested": {
+        "key": "lines",
+        "filter": {
+         "must": [
+          {
+           "key": "over_by",
+           "range": {
+            "gt": 1000
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "args": [
+    "m_ben",
+    0,
+    20
+   ],
+   "body": {
+    "shard_key": "m_ben",
+    "limit": 20,
+    "with_payload": true,
+    "order_by": {
+     "key": "updated_at",
+     "direction": "desc"
+    },
+    "filter": {
+     "must": [
+      {
+       "key": "manager_id",
+       "match": {
+        "value": "m_ben"
+       }
+      },
+      {
+       "nested": {
+        "key": "lines",
+        "filter": {
+         "must": [
+          {
+           "key": "over_by",
+           "range": {
+            "gt": 0
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "office_scroll": [
+  {
+   "args": [
+    "m_anna",
+    "berlin"
+   ],
+   "body": {
+    "shard_key": "m_anna",
+    "limit": 1,
+    "with_payload": true,
+    "filter": {
+     "must": [
+      {
+       "key": "manager_id",
+       "match": {
+        "value": "m_anna"
+       }
+      },
+      {
+       "key": "office_id",
+       "match": {
+        "value": "berlin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "args": [
+    "m_ben",
+    "london"
+   ],
+   "body": {
+    "shard_key": "m_ben",
+    "limit": 1,
+    "with_payload": true,
+    "filter": {
+     "must": [
+      {
+       "key": "manager_id",
+       "match": {
+        "value": "m_ben"
+       }
+      },
+      {
+       "key": "office_id",
+       "match": {
+        "value": "london"
+       }
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "ask_batch": [
+  {
+   "args": [
+    "m_anna",
+    "PO-1042",
+    "2026-10-14T09:00:00Z",
+    5,
+    null
+   ],
+   "body": {
+    "searches": [
+     {
+      "shard_key": "m_anna",
+      "query": {
+       "nearest": {
+        "text": "PO-1042",
+        "model": "qdrant/bm25"
+       }
+      },
+      "using": "bm25",
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_anna"
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     },
+     {
+      "shard_key": "m_anna",
+      "query": {
+       "nearest": {
+        "text": "PO-1042",
+        "model": "answerdotai/answerai-colbert-small-v1"
+       }
+      },
+      "using": "digest",
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_anna"
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     },
+     {
+      "shard_key": "m_anna",
+      "query": {
+       "nearest": {
+        "text": "PO-1042",
+        "model": "sentence-transformers/all-minilm-l6-v2"
+       }
+      },
+      "using": "summary",
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_anna"
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     },
+     {
+      "shard_key": "m_anna",
+      "prefetch": {
+       "prefetch": [
+        {
+         "query": {
+          "nearest": {
+           "text": "PO-1042",
+           "model": "qdrant/bm25"
+          }
+         },
+         "using": "bm25",
+         "limit": 20,
+         "filter": {
+          "must": [
+           {
+            "key": "manager_id",
+            "match": {
+             "value": "m_anna"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "query": {
+          "nearest": {
+           "text": "PO-1042",
+           "model": "answerdotai/answerai-colbert-small-v1"
+          }
+         },
+         "using": "digest",
+         "limit": 20,
+         "filter": {
+          "must": [
+           {
+            "key": "manager_id",
+            "match": {
+             "value": "m_anna"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "query": {
+          "nearest": {
+           "text": "PO-1042",
+           "model": "sentence-transformers/all-minilm-l6-v2"
+          }
+         },
+         "using": "summary",
+         "limit": 20,
+         "filter": {
+          "must": [
+           {
+            "key": "manager_id",
+            "match": {
+             "value": "m_anna"
+            }
+           }
+          ]
+         }
+        }
+       ],
+       "query": {
+        "rrf": {}
+       },
+       "limit": 20
+      },
+      "query": {
+       "formula": {
+        "sum": [
+         "$score",
+         {
+          "mult": [
+           0.1,
+           {
+            "exp_decay": {
+             "x": {
+              "datetime_key": "updated_at"
+             },
+             "target": {
+              "datetime": "2026-10-14T09:00:00Z"
+             },
+             "scale": 2592000,
+             "midpoint": 0.5
+            }
+           }
+          ]
+         }
+        ]
+       }
+      },
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_anna"
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "args": [
+    "m_ben",
+    "which office overspends on travel?",
+    "2026-10-14T09:00:00Z",
+    5,
+    2500
+   ],
+   "body": {
+    "searches": [
+     {
+      "shard_key": "m_ben",
+      "query": {
+       "nearest": {
+        "text": "which office overspends on travel?",
+        "model": "qdrant/bm25"
+       }
+      },
+      "using": "bm25",
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_ben"
+         }
+        },
+        {
+         "nested": {
+          "key": "lines",
+          "filter": {
+           "must": [
+            {
+             "key": "over_by",
+             "range": {
+              "gt": 2500
+             }
+            }
+           ]
+          }
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     },
+     {
+      "shard_key": "m_ben",
+      "query": {
+       "nearest": {
+        "text": "which office overspends on travel?",
+        "model": "answerdotai/answerai-colbert-small-v1"
+       }
+      },
+      "using": "digest",
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_ben"
+         }
+        },
+        {
+         "nested": {
+          "key": "lines",
+          "filter": {
+           "must": [
+            {
+             "key": "over_by",
+             "range": {
+              "gt": 2500
+             }
+            }
+           ]
+          }
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     },
+     {
+      "shard_key": "m_ben",
+      "query": {
+       "nearest": {
+        "text": "which office overspends on travel?",
+        "model": "sentence-transformers/all-minilm-l6-v2"
+       }
+      },
+      "using": "summary",
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_ben"
+         }
+        },
+        {
+         "nested": {
+          "key": "lines",
+          "filter": {
+           "must": [
+            {
+             "key": "over_by",
+             "range": {
+              "gt": 2500
+             }
+            }
+           ]
+          }
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     },
+     {
+      "shard_key": "m_ben",
+      "prefetch": {
+       "prefetch": [
+        {
+         "query": {
+          "nearest": {
+           "text": "which office overspends on travel?",
+           "model": "qdrant/bm25"
+          }
+         },
+         "using": "bm25",
+         "limit": 20,
+         "filter": {
+          "must": [
+           {
+            "key": "manager_id",
+            "match": {
+             "value": "m_ben"
+            }
+           },
+           {
+            "nested": {
+             "key": "lines",
+             "filter": {
+              "must": [
+               {
+                "key": "over_by",
+                "range": {
+                 "gt": 2500
+                }
+               }
+              ]
+             }
+            }
+           }
+          ]
+         }
+        },
+        {
+         "query": {
+          "nearest": {
+           "text": "which office overspends on travel?",
+           "model": "answerdotai/answerai-colbert-small-v1"
+          }
+         },
+         "using": "digest",
+         "limit": 20,
+         "filter": {
+          "must": [
+           {
+            "key": "manager_id",
+            "match": {
+             "value": "m_ben"
+            }
+           },
+           {
+            "nested": {
+             "key": "lines",
+             "filter": {
+              "must": [
+               {
+                "key": "over_by",
+                "range": {
+                 "gt": 2500
+                }
+               }
+              ]
+             }
+            }
+           }
+          ]
+         }
+        },
+        {
+         "query": {
+          "nearest": {
+           "text": "which office overspends on travel?",
+           "model": "sentence-transformers/all-minilm-l6-v2"
+          }
+         },
+         "using": "summary",
+         "limit": 20,
+         "filter": {
+          "must": [
+           {
+            "key": "manager_id",
+            "match": {
+             "value": "m_ben"
+            }
+           },
+           {
+            "nested": {
+             "key": "lines",
+             "filter": {
+              "must": [
+               {
+                "key": "over_by",
+                "range": {
+                 "gt": 2500
+                }
+               }
+              ]
+             }
+            }
+           }
+          ]
+         }
+        }
+       ],
+       "query": {
+        "rrf": {}
+       },
+       "limit": 20
+      },
+      "query": {
+       "formula": {
+        "sum": [
+         "$score",
+         {
+          "mult": [
+           0.1,
+           {
+            "exp_decay": {
+             "x": {
+              "datetime_key": "updated_at"
+             },
+             "target": {
+              "datetime": "2026-10-14T09:00:00Z"
+             },
+             "scale": 2592000,
+             "midpoint": 0.5
+            }
+           }
+          ]
+         }
+        ]
+       }
+      },
+      "filter": {
+       "must": [
+        {
+         "key": "manager_id",
+         "match": {
+          "value": "m_ben"
+         }
+        },
+        {
+         "nested": {
+          "key": "lines",
+          "filter": {
+           "must": [
+            {
+             "key": "over_by",
+             "range": {
+              "gt": 2500
+             }
+            }
+           ]
+          }
+         }
+        }
+       ]
+      },
+      "limit": 5,
+      "with_payload": [
+       "office_id",
+       "name",
+       "documents",
+       "summary_text",
+       "summary_stage"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

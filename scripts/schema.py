@@ -1,9 +1,9 @@
-"""The `customers` collection: one definition shared by setup, smoke, and the Edge gate."""
+"""The `offices` collection: one definition shared by setup, smoke, and the dashboard."""
 
 import copy
 from types import MappingProxyType
 
-COLLECTION = "customers"
+COLLECTION = "offices"
 SHARD_KEYS = ("m_anna", "m_ben")
 
 MODELS = MappingProxyType({
@@ -21,14 +21,13 @@ _SPARSE_VECTORS = MappingProxyType({"bm25": {"modifier": "idf"}})
 # field -> field_schema for PUT /collections/{name}/index, in creation order
 PAYLOAD_INDEXES = MappingProxyType({
     "manager_id": {"type": "keyword", "is_tenant": True},
-    "worker_id": {"type": "keyword"},
-    "customer_id": {"type": "keyword"},
-    "deleted_at": {"type": "datetime"},
-    "last_invoice_at": {"type": "datetime"},
-    "updated_at": {"type": "datetime"},
+    "office_id": {"type": "keyword"},
     "stage": {"type": "integer"},
-    "invoices[].status": {"type": "keyword"},
-    "invoices[].amount": {"type": "float"},
+    "updated_at": {"type": "datetime"},
+    "latest.received_at": {"type": "datetime"},
+    "lines[].category": {"type": "keyword"},
+    "lines[].over_by": {"type": "float"},
+    "documents[].doc_type": {"type": "keyword"},
 })
 
 

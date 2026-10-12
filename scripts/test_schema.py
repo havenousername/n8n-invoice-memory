@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from schema import MODELS, PAYLOAD_INDEXES, collection_spec, drift, missing_indexes
+from schema import COLLECTION, MODELS, PAYLOAD_INDEXES, collection_spec, drift, missing_indexes
 
 
 def compatible_info() -> dict:
@@ -24,14 +24,13 @@ def compatible_info() -> dict:
         },
         "payload_schema": {
             "manager_id": {"data_type": "keyword", "params": {"type": "keyword", "is_tenant": True}, "points": 0},
-            "worker_id": dict(keyword),
-            "customer_id": dict(keyword),
-            "deleted_at": {"data_type": "datetime", "points": 0},
-            "last_invoice_at": {"data_type": "datetime", "points": 0},
-            "updated_at": {"data_type": "datetime", "points": 0},
+            "office_id": dict(keyword),
             "stage": {"data_type": "integer", "points": 0},
-            "invoices[].status": dict(keyword),
-            "invoices[].amount": {"data_type": "float", "points": 0},
+            "updated_at": {"data_type": "datetime", "points": 0},
+            "latest.received_at": {"data_type": "datetime", "points": 0},
+            "lines[].category": dict(keyword),
+            "lines[].over_by": {"data_type": "float", "points": 0},
+            "documents[].doc_type": dict(keyword),
         },
     }
 
@@ -46,6 +45,9 @@ class CollectionSpecTest(unittest.TestCase):
         )
         self.assertEqual(spec["sparse_vectors"], {"bm25": {"modifier": "idf"}})
         self.assertEqual(spec["sharding_method"], "custom")
+
+    def test_collection_name(self):
+        self.assertEqual(COLLECTION, "offices")
 
     def test_spec_is_a_fresh_copy(self):
         collection_spec()["vectors"]["summary"]["size"] = 1
@@ -62,8 +64,8 @@ class CollectionSpecTest(unittest.TestCase):
         )
         self.assertEqual(
             list(PAYLOAD_INDEXES),
-            ["manager_id", "worker_id", "customer_id", "deleted_at", "last_invoice_at",
-             "updated_at", "stage", "invoices[].status", "invoices[].amount"],
+            ["manager_id", "office_id", "stage", "updated_at", "latest.received_at",
+             "lines[].category", "lines[].over_by", "documents[].doc_type"],
         )
 
 
@@ -114,8 +116,8 @@ class DriftTest(unittest.TestCase):
 
     def test_index_with_wrong_type(self):
         info = compatible_info()
-        info["payload_schema"]["invoices[].amount"]["data_type"] = "integer"
-        self.assert_one_mismatch(info, "invoices[].amount", "integer", "float")
+        info["payload_schema"]["lines[].over_by"]["data_type"] = "integer"
+        self.assert_one_mismatch(info, "lines[].over_by", "integer", "float")
 
     def test_tenant_index_without_is_tenant(self):
         info = compatible_info()
@@ -133,8 +135,8 @@ class MissingIndexesTest(unittest.TestCase):
     def test_lists_absent_fields_in_declaration_order(self):
         info = compatible_info()
         del info["payload_schema"]["stage"]
-        del info["payload_schema"]["worker_id"]
-        self.assertEqual(missing_indexes(info), ["worker_id", "stage"])
+        del info["payload_schema"]["office_id"]
+        self.assertEqual(missing_indexes(info), ["office_id", "stage"])
 
     def test_empty_schema_misses_everything(self):
         info = copy.deepcopy(compatible_info())

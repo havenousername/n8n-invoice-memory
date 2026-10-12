@@ -5,8 +5,8 @@ from setup_collection import SchemaDrift, ensure_collection
 from test_schema import compatible_info
 from transport import HttpError
 
-ALL_INDEXES = ["manager_id", "worker_id", "customer_id", "deleted_at", "last_invoice_at",
-               "updated_at", "stage", "invoices[].status", "invoices[].amount"]
+ALL_INDEXES = ["manager_id", "office_id", "stage", "updated_at", "latest.received_at",
+               "lines[].category", "lines[].over_by", "documents[].doc_type"]
 
 
 class FakeQdrant:
@@ -64,11 +64,11 @@ class EnsureCollectionTest(unittest.TestCase):
         actions = ensure_collection(qdrant)
         self.assertEqual(
             actions,
-            ["created collection customers", "created shard key m_anna", "created shard key m_ben"]
+            ["created collection offices", "created shard key m_anna", "created shard key m_ben"]
             + [f"created index {field}" for field in ALL_INDEXES],
         )
         self.assertIn(
-            ("PUT", "/collections/customers/index?wait=true",
+            ("PUT", "/collections/offices/index?wait=true",
              {"field_name": "manager_id", "field_schema": {"type": "keyword", "is_tenant": True}}),
             qdrant.calls,
         )
@@ -90,14 +90,14 @@ class EnsureCollectionTest(unittest.TestCase):
         info = compatible_info()
         del info["payload_schema"]["stage"]
         qdrant = FakeQdrant()
-        qdrant.seed("customers", info, ["m_anna"])
+        qdrant.seed("offices", info, ["m_anna"])
         self.assertEqual(ensure_collection(qdrant), ["created shard key m_ben", "created index stage"])
 
     def test_drifted_collection_raises_before_any_write(self):
         info = compatible_info()
         info["config"]["params"]["vectors"]["summary"]["size"] = 768
         qdrant = FakeQdrant()
-        qdrant.seed("customers", info, [])
+        qdrant.seed("offices", info, [])
         with self.assertRaises(SchemaDrift) as caught:
             ensure_collection(qdrant)
         self.assertTrue(any("summary" in m for m in caught.exception.mismatches))

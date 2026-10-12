@@ -2,7 +2,7 @@ import re
 import unittest
 import uuid
 
-from smoke import drop_smoke_collection, fixture_points, smoke_collection_name, with_deleted_at
+from smoke import drop_smoke_collection, fixture_points, smoke_collection_name, within_plan
 
 NOW = "2026-10-09T10:00:00Z"
 
@@ -36,30 +36,33 @@ class FixtureTest(unittest.TestCase):
         for point_id in ids:
             self.assertEqual(str(uuid.UUID(point_id)), point_id)
 
-    def test_tenants_and_slugs(self):
+    def test_tenants_and_offices(self):
         self.assertEqual(
-            [(f.manager, f.payload["customer_id"]) for f in fixture_points(NOW)],
-            [("m_anna", "smoke"), ("m_anna", "decoy"), ("m_ben", "smoke")],
+            [(f.manager, f.payload["office_id"]) for f in fixture_points(NOW)],
+            [("m_anna", "berlin"), ("m_anna", "vienna"), ("m_ben", "berlin")],
         )
 
-    def test_decoy_satisfies_each_condition_only_on_different_invoices(self):
-        decoy = fixture_points(NOW)[1]
-        invoices = decoy.payload["invoices"]
-        self.assertTrue(any(i["status"] == "overdue" for i in invoices))
-        self.assertTrue(any(i["amount"] >= 10000 for i in invoices))
-        self.assertFalse(any(i["status"] == "overdue" and i["amount"] >= 10000 for i in invoices))
+    def test_only_annas_berlin_is_over_plan_by_more_than_1000(self):
+        over = {(f.manager, f.payload["office_id"]): max(l["over_by"] for l in f.payload["lines"]) for f in fixture_points(NOW)}
+        self.assertEqual(over[("m_anna", "berlin")], 16000)
+        self.assertEqual(over[("m_anna", "vienna")], 500)
+        self.assertEqual(over[("m_ben", "berlin")], 0)
+
+    def test_both_berlins_mention_the_booth_order_so_a_leaking_tenant_filter_shows(self):
+        mentions = [f.manager + "/" + f.payload["office_id"] for f in fixture_points(NOW) if "PO-1042" in f.texts["bm25"]]
+        self.assertEqual(mentions, ["m_anna/berlin", "m_ben/berlin"])
 
     def test_texts_cover_all_three_vectors(self):
         for fixture in fixture_points(NOW):
             self.assertEqual(set(fixture.texts), {"summary", "digest", "bm25"})
             self.assertTrue(all(fixture.texts.values()))
 
-    def test_with_deleted_at_returns_a_copy(self):
+    def test_within_plan_returns_a_copy_with_no_line_over(self):
         original = fixture_points(NOW)[0]
-        deleted = with_deleted_at(original, "2026-08-30T10:00:00Z")
-        self.assertEqual(deleted.payload["deleted_at"], "2026-08-30T10:00:00Z")
-        self.assertNotIn("deleted_at", original.payload)
-
+        replaced = within_plan(original)
+        self.assertEqual(replaced.point_id, original.point_id)
+        self.assertEqual([l["over_by"] for l in replaced.payload["lines"]], [0] * len(original.payload["lines"]))
+        self.assertEqual(max(l["over_by"] for l in original.payload["lines"]), 16000)
 
 if __name__ == "__main__":
     unittest.main()

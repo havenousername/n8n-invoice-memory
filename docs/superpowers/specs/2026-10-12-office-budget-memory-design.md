@@ -94,7 +94,7 @@ stage, pending_count               // min stage of current documents; documents 
 lines[]                            // per category: category, name, budget, committed, credited, remaining, over_by
 committed, budget, used_pct        // totals over all categories
 booked, deal_count                 // current deals
-documents[]                        // key, version, type, kind, counterparty, category, amount, description_en,
+documents[]                        // doc_key, version, doc_type, kind, counterparty, category, amount, description_en,
                                    //   date, status (current | superseded | duplicate), stage, received_at
 superseded_count, duplicate_count
 latest                             // newest received document, any kind
@@ -113,14 +113,16 @@ updated_at
 
 The `page` vector makes the multimodal claim literal: the first three are text representations. It ships only if the day-1 gate proves an image model on the cluster's Cloud Inference; otherwise it is cut and the booth says "three representations", not "multimodal".
 
+**Gate result (2026-10-12): passed.** `qdrant/clip-vit-b-32-vision` embeds an image given by URL (one upsert in 1.5 s) and `qdrant/clip-vit-b-32-text` queries it from text. Base64 images are rejected at any size, so every page image must be published at a URL (the raw GitHub file beside its PDF).
+
 The vision read returns an English description of every document, so English questions match German documents in the Line and Meaning lenses.
 
-**Payload indexes:** `manager_id` (keyword, tenant), `office_id` (keyword), `stage` (integer), `updated_at` and `latest.received_at` (datetime), `lines[].category` (keyword), `lines[].over_by` (float), `documents[].type` (keyword).
+**Payload indexes:** `manager_id` (keyword, tenant), `office_id` (keyword), `stage` (integer), `updated_at` and `latest.received_at` (datetime), `lines[].category` (keyword), `lines[].over_by` (float), `documents[].doc_type` (keyword).
 
 **Requests** (reference bodies in `scripts/bodies.py`):
 - List: scroll the manager's offices, ordered by `updated_at`.
 - Over plan: nested filter on `lines` with `over_by` greater than X (replaces "overdue over").
-- Ask: one `points/query/batch` request with four searches under the tenant filter: Keyword only, Line only, Meaning only, and the fused query (the three as prefetches, RRF, then freshness decay on `updated_at`).
+- Ask: one `points/query/batch` request with four searches under the tenant filter (and the over-plan threshold when set): Keyword only, Line only, Meaning only, and the fused query (the three as prefetches, RRF, then freshness decay on `updated_at`).
 
 ## 5. n8n workflows
 

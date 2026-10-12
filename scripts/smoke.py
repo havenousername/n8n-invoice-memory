@@ -1,7 +1,7 @@
 """Smoke test: every reference request shape against a disposable collection.
 
 Acceptance script: it creates invoice_memory_smoke_<time>_<pid> on the cluster in .env with the production
-schema, runs eight checks, and always deletes that collection. It never touches any other collection.
+schema, runs six checks, and always deletes that collection. It never touches any other collection.
 """
 
 import copy
@@ -9,9 +9,10 @@ import dataclasses
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import bodies
+from positions import CATEGORIES
 from env import InvalidEnvFile, MissingSetting, load_settings
 from qdrant_api import QdrantCall, connect
 from setup_collection import SchemaDrift, ensure_collection
@@ -47,32 +48,26 @@ def drop_smoke_collection(call: QdrantCall, name: str) -> None:
 
 
 def fixture_points(now_iso: str) -> list[Fixture]:
-    """Anna's real match, Anna's decoy for the nested filter, and the same slug under Ben."""
+    """Anna's Berlin over plan, Anna's Vienna as a decoy just over, and the same Berlin under Ben within plan."""
     return [
-        _fixture("m_anna", "11111111-1111-4111-8111-111111111111", "smoke", "Smoke GmbH", now_iso, [
-            _invoice("INV-4711", 12300.00, "overdue", "Hetzner Online GmbH", "Hetzner servers, rack 12"),
-        ]),
-        _fixture("m_anna", "22222222-2222-4222-8222-222222222222", "decoy", "Decoy AG", now_iso, [
-            _invoice("INV-5001", 500.00, "overdue", "Office Depot", "office chairs"),
-            _invoice("INV-5002", 20000.00, "paid", "Deloitte GmbH", "consulting, annual audit"),
-        ]),
-        _fixture("m_ben", "33333333-3333-4333-8333-333333333333", "smoke", "Smoke GmbH", now_iso, [
-            _invoice("INV-7001", 15000.00, "overdue", "Hetzner Online GmbH", "Hetzner servers, rack 40"),
-        ]),
+        _fixture("m_anna", "11111111-1111-4111-8111-111111111111", "berlin", "Berlin", now_iso, "gpu", 120000, 136000,
+                 "PO-1042", "Rechenwerk Systems GmbH", "GPU servers (11x) for the inference launch, order expanded"),
+        _fixture("m_anna", "22222222-2222-4222-8222-222222222222", "vienna", "Vienna", now_iso, "travel", 40000, 40500,
+                 "PO-3001", "Wiener Kongress GmbH", "Booth and travel for the Vienna AI summit"),
+        _fixture("m_ben", "33333333-3333-4333-8333-333333333333", "berlin", "Berlin", now_iso, "gpu", 120000, 48000,
+                 "PO-1042", "Rechenwerk Systems GmbH", "GPU servers (4x) for the inference launch, deposit"),
     ]
 
 
-def with_deleted_at(fixture: Fixture, deleted_at: str | None) -> Fixture:
+def within_plan(fixture: Fixture) -> Fixture:
     payload = copy.deepcopy(fixture.payload)
-    if deleted_at is None:
-        payload.pop("deleted_at", None)
-    else:
-        payload["deleted_at"] = deleted_at
+    for line in payload["lines"]:
+        line["over_by"] = 0
     return dataclasses.replace(fixture, payload=payload)
 
 
 def run_smoke(call: QdrantCall, collection: str, now_iso: str) -> list[str]:
-    """Run the eight checks in order; return their names, or raise SmokeFailure at the first that fails."""
+    """Run the six checks in order; return their names, or raise SmokeFailure at the first that fails."""
     points = f"/collections/{collection}/points"
     anna, decoy, ben = fixture_points(now_iso)
     passed: list[str] = []
@@ -80,8 +75,8 @@ def run_smoke(call: QdrantCall, collection: str, now_iso: str) -> list[str]:
     def scroll(body: dict) -> list[dict]:
         return call("POST", f"{points}/scroll", body)["points"]
 
-    def slugs(found: list[dict]) -> set[str]:
-        return {p["payload"]["customer_id"] for p in found}
+    def offices(found: list[dict]) -> set[str]:
+        return {p["payload"]["office_id"] for p in found}
 
     def write(fixture: Fixture) -> None:
         call("PUT", f"{points}?wait=true", bodies.upsert(fixture.manager, fixture.point_id, fixture.payload, fixture.texts))
@@ -92,69 +87,47 @@ def run_smoke(call: QdrantCall, collection: str, now_iso: str) -> list[str]:
         passed.append(name)
 
     ensure_collection(call, collection)
-    leftovers = [f for f in (anna, decoy, ben) if scroll(bodies.customer_scroll(f.manager, f.payload["customer_id"]))]
+    leftovers = [f for f in (anna, decoy, ben) if scroll(bodies.office_scroll(f.manager, f.payload["office_id"]))]
     check("setup", not leftovers, leftovers)
 
     for fixture in (anna, decoy, ben):
         write(fixture)
     check("upsert", True, None)
 
-    overdue = slugs(scroll(bodies.live_scroll("m_anna", 10000)))
-    check("nested", overdue == {"smoke"}, overdue)
+    over = offices(scroll(bodies.office_list("m_anna", over_gt=1000)))
+    check("over_plan", over == {"berlin"}, over)
 
-    ben_points = scroll(bodies.live_scroll("m_ben"))
+    ben_points = scroll(bodies.office_list("m_ben"))
     check("tenant", [p["id"] for p in ben_points] == [ben.point_id], ben_points)
 
-    hits = call("POST", f"{points}/query", bodies.hybrid_query("m_anna", "servers", now_iso))["points"]
-    check("hybrid", bool(hits) and hits[0]["id"] == anna.point_id
-          and {h["id"] for h in hits} <= {anna.point_id, decoy.point_id}, hits)
+    lists = [r["points"] for r in call("POST", f"{points}/query/batch", bodies.ask_batch("m_anna", "PO-1042", now_iso))]
+    hit_ids = {h["id"] for hits in lists for h in hits}
+    check("ask_batch", len(lists) == 4 and bool(lists[0]) and lists[0][0]["id"] == anna.point_id
+          and hit_ids <= {anna.point_id, decoy.point_id}, lists)
 
-    write(with_deleted_at(anna, _shift(now_iso, days=-40)))
-    live, removed = slugs(scroll(bodies.live_scroll("m_anna"))), slugs(scroll(bodies.removed_scroll("m_anna")))
-    check("soft_delete", "smoke" not in live and "smoke" in removed, (live, removed))
-
-    write(anna)
-    restored = scroll(bodies.customer_scroll("m_anna", "smoke"))
-    check("restore", bool(restored) and "deleted_at" not in restored[0]["payload"]
-          and "smoke" in slugs(scroll(bodies.live_scroll("m_anna"))), restored)
-
-    write(with_deleted_at(anna, _shift(now_iso, days=-40)))
-    call("POST", f"{points}/delete?wait=true", bodies.purge("m_anna", "smoke", _shift(now_iso, days=-30)))
-    survivors = {
-        "anna/smoke": bool(scroll(bodies.customer_scroll("m_anna", "smoke"))),
-        "anna/decoy": bool(scroll(bodies.customer_scroll("m_anna", "decoy"))),
-        "ben/smoke": bool(scroll(bodies.customer_scroll("m_ben", "smoke"))),
-    }
-    check("purge", survivors == {"anna/smoke": False, "anna/decoy": True, "ben/smoke": True}, survivors)
+    write(within_plan(anna))
+    after = scroll(bodies.office_list("m_anna"))
+    check("replace", len(after) == 2 and not scroll(bodies.office_list("m_anna", over_gt=1000)), after)
     return passed
 
 
-def _fixture(manager: str, point_id: str, customer: str, name: str, now_iso: str, invoices: list[dict]) -> Fixture:
+def _fixture(manager: str, point_id: str, office: str, name: str, now_iso: str, category: str, budget: float,
+             committed: float, key: str, counterparty: str, description: str) -> Fixture:
+    lines = [{"category": c, "budget": budget if c == category else 0, "committed": committed if c == category else 0,
+              "over_by": max(0, committed - budget) if c == category else 0} for c in CATEGORIES]
+    document = {"doc_key": key, "doc_type": "cost", "version": 1, "category": category, "amount": committed,
+                "counterparty": counterparty, "description_en": description, "status": "current", "stage": 2,
+                "received_at": now_iso}
     payload = {
-        "manager_id": manager, "worker_id": "w_smoke", "customer_id": customer, "name": name,
-        "stage": 2, "pending_count": 0, "invoice_count": len(invoices),
-        "last_invoice_at": now_iso, "updated_at": now_iso, "invoices": invoices,
+        "office_id": office, "manager_id": manager, "name": name, "stage": 2, "pending_count": 0,
+        "lines": lines, "documents": [document], "latest": document, "updated_at": now_iso,
     }
-    digest = "\n".join(
-        f"{i['invoice_no']} | {i['date']} | {i['amount']:.2f} EUR | due {i['due_date']} | {i['status']} | {i['items']}"
-        for i in invoices
-    )
     texts = {
-        "summary": f"{len(invoices)} invoices for {name}",
-        "digest": digest,
-        "bm25": "\n".join(f"Invoice {i['invoice_no']} {i['vendor']} {i['items']} total {i['amount']:.2f}" for i in invoices),
+        "summary": f"{name}: {committed:.2f} EUR committed in {category}, {max(0, committed - budget):.2f} EUR over plan.",
+        "digest": f"{key} v1 | 2026-10-06 | Commitment | {category} | {counterparty} | {committed:.2f} EUR | {description}",
+        "bm25": f"BESTELLUNG Belegnummer: {key} Lieferant: {counterparty} Betrag: {committed:.2f} EUR\n{description}",
     }
     return Fixture(manager, point_id, payload, texts)
-
-
-def _invoice(invoice_no: str, amount: float, status: str, vendor: str, items: str) -> dict:
-    return {"invoice_no": invoice_no, "date": "2026-09-01", "due_date": "2026-09-15", "amount": amount,
-            "vendor": vendor, "status": status, "stage": 2, "error": "", "items": items}
-
-
-def _shift(now_iso: str, days: int) -> str:
-    moment = datetime.fromisoformat(now_iso) + timedelta(days=days)
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def main() -> int:
