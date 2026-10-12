@@ -5,7 +5,7 @@ import { normalizeQuery, parseOver } from '@/lib/ask';
 import type { LensResults } from '@/lib/shape';
 import { LENSES, LensAnswer, type LensKey } from './LensColumns';
 
-export type Answer = { lenses: LensResults; took_ms: number; query: string };
+export type Answer = { lenses: LensResults; took_ms: number; query: string; manager: string };
 const EXAMPLES = ['PO-1042', 'GPU servers for the launch', 'which office overspends on travel?'];
 
 type Props = {
@@ -32,7 +32,7 @@ export function AskPanel({ manager, answer, onAnswer, lens, onLens, open, onTogg
       const response = await fetch(`/api/ask?${params}`, { cache: 'no-store' });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? `ask failed (${response.status})`);
-      onAnswer({ lenses: body.lenses, took_ms: body.took_ms, query });
+      onAnswer({ lenses: body.lenses, took_ms: body.took_ms, query, manager });
     } catch (err) {
       setError((err as Error).message);
     } finally {
