@@ -2,109 +2,109 @@
  {
   "office_id": "berlin",
   "code": "ber",
-  "name": "Berlin",
-  "region": "Central",
+  "name": "DevSummit Berlin",
+  "region": "DACH",
   "manager_id": "m_anna",
   "manager_name": "Anna",
   "worker_id": "w_tom",
   "worker_name": "Tom",
   "cost_center": "CC-BER-01",
   "budgets": {
-   "people": 820000,
-   "cloud": 180000,
+   "people": 160000,
+   "cloud": 90000,
    "gpu": 120000,
-   "office": 95000,
-   "travel": 60000
+   "office": 220000,
+   "travel": 180000
   }
  },
  {
   "office_id": "munich",
   "code": "muc",
-  "name": "Munich",
-  "region": "Central",
+  "name": "CloudTage München",
+  "region": "DACH",
   "manager_id": "m_anna",
   "manager_name": "Anna",
   "worker_id": "w_tom",
   "worker_name": "Tom",
   "cost_center": "CC-MUC-01",
   "budgets": {
-   "people": 760000,
-   "cloud": 140000,
-   "gpu": 210000,
-   "office": 90000,
-   "travel": 50000
+   "people": 120000,
+   "cloud": 70000,
+   "gpu": 150000,
+   "office": 160000,
+   "travel": 140000
   }
  },
  {
   "office_id": "vienna",
   "code": "vie",
-  "name": "Vienna",
-  "region": "Central",
+  "name": "AI Forum Wien",
+  "region": "DACH",
   "manager_id": "m_anna",
   "manager_name": "Anna",
   "worker_id": "w_lena",
   "worker_name": "Lena",
   "cost_center": "CC-VIE-01",
   "budgets": {
-   "people": 540000,
-   "cloud": 90000,
-   "gpu": 60000,
-   "office": 70000,
-   "travel": 40000
+   "people": 90000,
+   "cloud": 50000,
+   "gpu": 80000,
+   "office": 120000,
+   "travel": 100000
   }
  },
  {
   "office_id": "amsterdam",
   "code": "ams",
-  "name": "Amsterdam",
-  "region": "West",
+  "name": "DataWeek Amsterdam",
+  "region": "International",
   "manager_id": "m_ben",
   "manager_name": "Ben",
   "worker_id": "w_jules",
   "worker_name": "Jules",
   "cost_center": "CC-AMS-01",
   "budgets": {
-   "people": 610000,
-   "cloud": 150000,
-   "gpu": 90000,
-   "office": 80000,
-   "travel": 55000
+   "people": 110000,
+   "cloud": 80000,
+   "gpu": 100000,
+   "office": 150000,
+   "travel": 130000
   }
  },
  {
   "office_id": "paris",
   "code": "par",
-  "name": "Paris",
-  "region": "West",
+  "name": "Paris Tech Days",
+  "region": "International",
   "manager_id": "m_ben",
   "manager_name": "Ben",
   "worker_id": "w_jules",
   "worker_name": "Jules",
   "cost_center": "CC-PAR-01",
   "budgets": {
-   "people": 700000,
-   "cloud": 120000,
+   "people": 130000,
+   "cloud": 100000,
    "gpu": 140000,
-   "office": 110000,
-   "travel": 70000
+   "office": 200000,
+   "travel": 160000
   }
  },
  {
   "office_id": "london",
   "code": "lon",
-  "name": "London",
-  "region": "West",
+  "name": "FinTech Expo London",
+  "region": "International",
   "manager_id": "m_ben",
   "manager_name": "Ben",
   "worker_id": "w_mia",
   "worker_name": "Mia",
   "cost_center": "CC-LON-01",
   "budgets": {
-   "people": 880000,
-   "cloud": 200000,
+   "people": 170000,
+   "cloud": 140000,
    "gpu": 160000,
-   "office": 130000,
-   "travel": 90000
+   "office": 260000,
+   "travel": 210000
   }
  }
 ]

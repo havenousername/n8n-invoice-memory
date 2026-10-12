@@ -2,8 +2,8 @@
 // Pasted into Code nodes without the module.exports line. Deterministic: same input, same bytes.
 
 const PDF_CATEGORY_LABELS = {
-  people: 'Personal', cloud: 'Cloud-Infrastruktur', gpu: 'GPU-Rechenleistung',
-  office: 'Büro und Ausstattung', travel: 'Reisen und Events',
+  people: 'Personal und Crew', cloud: 'Marketing und Werbung', gpu: 'Bühne und Technik',
+  office: 'Veranstaltungsort', travel: 'Catering',
 };
 const PDF_TITLES = { cost: 'BESTELLUNG', deal: 'KUNDENAUFTRAG', credit: 'GUTSCHRIFT' };
 const PDF_FOOTER = 'Synthetischer Beleg für eine Demo. Keine echte Firma, keine echte Forderung.';

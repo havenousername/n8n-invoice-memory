@@ -5,10 +5,11 @@ Belegnummer: PO-1042
 Version: 2 (ersetzt Version 1)
 Datum: 13.10.2026
 Kostenstelle: CC-BER-01
-Standort: Berlin
-Lieferant: Rechenwerk Systems GmbH
-Kategorie: GPU-Rechenleistung
-Beschreibung: GPU-Server (11x) für den Inferenz-Launch, Auftrag erweitert
+Standort: DevSummit Berlin
+Lieferant: Lichtwerk Veranstaltungstechnik GmbH
+Kategorie: Bühne und Technik
+Beschreibung: Hauptbühne erweitert: zwei LED-Wände und eine zweite Bühne für
+den Sponsor-Keynote-Track
 
 Betrag: 132.000,00 €
 Eingereicht von: Tom

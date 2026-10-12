@@ -9,7 +9,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>
 endobj
 4 0 obj
-<< /Length 850 >>
+<< /Length 956 >>
 stream
 BT /F2 13 Tf 56 790 Td (Q8nten GmbH) Tj ET
 BT /F2 22 Tf 56 750 Td (BESTELLUNG) Tj ET
@@ -18,12 +18,13 @@ BT /F1 11 Tf 56 700 Td (Belegnummer: PO-1042) Tj ET
 BT /F1 11 Tf 56 681 Td (Version: 2 \(ersetzt Version 1\)) Tj ET
 BT /F1 11 Tf 56 662 Td (Datum: 13.10.2026) Tj ET
 BT /F1 11 Tf 56 643 Td (Kostenstelle: CC-BER-01) Tj ET
-BT /F1 11 Tf 56 624 Td (Standort: Berlin) Tj ET
-BT /F1 11 Tf 56 605 Td (Lieferant: Rechenwerk Systems GmbH) Tj ET
-BT /F1 11 Tf 56 586 Td (Kategorie: GPU-Rechenleistung) Tj ET
-BT /F1 11 Tf 56 567 Td (Beschreibung: GPU-Server \(11x\) f\374r den Inferenz-Launch, Auftrag erweitert) Tj ET
-BT /F2 14 Tf 56 538 Td (Betrag: 132.000,00 \200) Tj ET
-BT /F1 11 Tf 56 512 Td (Eingereicht von: Tom) Tj ET
+BT /F1 11 Tf 56 624 Td (Standort: DevSummit Berlin) Tj ET
+BT /F1 11 Tf 56 605 Td (Lieferant: Lichtwerk Veranstaltungstechnik GmbH) Tj ET
+BT /F1 11 Tf 56 586 Td (Kategorie: B\374hne und Technik) Tj ET
+BT /F1 11 Tf 56 567 Td (Beschreibung: Hauptb\374hne erweitert: zwei LED-W\344nde und eine zweite B\374hne f\374r) Tj ET
+BT /F1 11 Tf 56 548 Td (              den Sponsor-Keynote-Track) Tj ET
+BT /F2 14 Tf 56 519 Td (Betrag: 132.000,00 \200) Tj ET
+BT /F1 11 Tf 56 493 Td (Eingereicht von: Tom) Tj ET
 BT /F1 8 Tf 56 60 Td (Synthetischer Beleg f\374r eine Demo. Keine echte Firma, keine echte Forderung.) Tj ET
 endstream
 endobj
@@ -40,10 +41,10 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000251 00000 n 
-0000001152 00000 n 
-0000001249 00000 n 
+0000001258 00000 n 
+0000001355 00000 n 
 trailer
 << /Size 7 /Root 1 0 R >>
 startxref
-1351
+1457
 %%EOF

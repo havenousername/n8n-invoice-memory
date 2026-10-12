@@ -17,7 +17,7 @@ const NODES: Record<NodeId, { x: number; y: number; name: string; tag: string; I
   vision: { x: 65, y: 22, name: 'Vision read', tag: '02 · model', Icon: Eye },
   summary: { x: 86, y: 22, name: 'Summary', tag: '02b · model', Icon: Sparkles },
   rebuild: { x: 56, y: 74, name: 'Rebuild', tag: '03', Icon: RefreshCw },
-  point: { x: 86, y: 74, name: 'Qdrant point', tag: 'one per office', Icon: Database, qdrant: true },
+  point: { x: 86, y: 74, name: 'Qdrant point', tag: 'one per event', Icon: Database, qdrant: true },
 };
 const EDGES: [NodeId, NodeId][] = [
   ['form', 'record'], ['console', 'record'], ['ai', 'record'], ['record', 'rough'], ['rough', 'vision'], ['vision', 'summary'],

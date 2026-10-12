@@ -31,15 +31,15 @@ export function OfficesPanel({ cards, now, view, onView, flashFor, lensFor }: Pr
   const pointCard = view.mode === 'point' ? shown.find((c) => c.office_id === view.office) : undefined;
   const open = (office: string) => onView({ mode: 'point', office, pinned: true });
   return (
-    <section className="panel offices" aria-label="Offices">
+    <section className="panel offices" aria-label="Events">
       <header className="canvas-head">
-        <p className="eyebrow">Offices · one Qdrant point each</p>
-        <div className="switch" role="tablist" aria-label="Offices view">
+        <p className="eyebrow">Events · one Qdrant point each</p>
+        <div className="switch" role="tablist" aria-label="Events view">
           <button type="button" role="tab" aria-selected={view.mode === 'chart'} onClick={() => onView({ mode: 'chart' })}>Chart</button>
           <button type="button" role="tab" aria-selected={view.mode === 'point'}
             onClick={() => shown[0] && open(view.mode === 'point' ? view.office : shown[0].office_id)}>Point</button>
         </div>
-        <span className="hint"><b>{view.mode === 'chart' ? 'Click an office.' : 'This is everything Qdrant holds about it.'}</b></span>
+        <span className="hint"><b>{view.mode === 'chart' ? 'Click an event.' : 'This is everything Qdrant holds about it.'}</b></span>
       </header>
       <div className="offices-body">
         {pointCard
@@ -57,7 +57,7 @@ export function OfficesPanel({ cards, now, view, onView, flashFor, lensFor }: Pr
 }
 
 type Size = { w: number; h: number };
-const PAD = { left: 52, right: 150, top: 14, bottom: 30 };
+const PAD = { left: 52, right: 240, top: 14, bottom: 30 };
 
 function useSize() {
   const ref = useRef<HTMLDivElement>(null);
@@ -91,7 +91,7 @@ function OfficeChart({ cards, now, onOpen }: { cards: OfficeCard[]; now: number;
   return (
     <div className="chart-box" ref={box}>
       {w > 0 && (
-        <svg width={w} height={h} role="img" aria-label="Percent of each office's budget committed over time">
+        <svg width={w} height={h} role="img" aria-label="Percent of each event's production budget committed over time">
           {[0, top / 2, top].map((v) => (
             <g key={v}>
               <line x1={PAD.left} x2={w - PAD.right} y1={y(v)} y2={y(v)} className="grid" />
@@ -198,7 +198,7 @@ function OfficeBox({ card, color, flash, status, lens, selected, onOpen }: BoxPr
   return (
     <button type="button" id={`card-${card.office_id}`} className="box" data-flash={flash?.kind} data-lens={lens} data-selected={selected || undefined}
       style={{ '--office': color, ...(lens ? { '--lens-color': LENS_COLOR[lens] } : {}) } as CSSProperties}
-      onClick={onOpen} aria-label={`${card.name} office: open its point`}>
+      onClick={onOpen} aria-label={`${card.name}: open its point`}>
       {key && <span key={key} className="flash-ring" aria-hidden="true" />}
       {flash?.kind === 'duplicate' && <span key={key} className="stamp dup-stamp" aria-hidden="true">Seen before</span>}
       <span className="box-head">

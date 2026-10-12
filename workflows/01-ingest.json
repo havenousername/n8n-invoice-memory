@@ -12,7 +12,7 @@
       ],
       "parameters": {
         "formTitle": "Send a document to Q8nten",
-        "formDescription": "Synthetic documents of a fictional company. Pick one; the controller who files it is known.",
+        "formDescription": "Synthetic documents of a fictional event agency. Pick one; the producer who files it is known.",
         "formFields": {
           "values": [
             {

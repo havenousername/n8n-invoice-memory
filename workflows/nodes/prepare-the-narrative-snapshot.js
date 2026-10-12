@@ -23,8 +23,8 @@ const body = {
     type: 'object', additionalProperties: false, required: ['narrative'], properties: { narrative: { type: 'string' } },
   } } },
   messages: [
-    { role: 'system', content: 'You write for a budget manager. Three plain sentences about this office: committed against budget, the categories over plan, the deals booked, and the most recent change, including amendments (a higher version replaces the older one). No bullet points.' },
-    { role: 'user', content: `Office: ${payload.name}\nPosition: ${JSON.stringify(position)}\nRecent documents, oldest first:\n${recent.join('\n')}` },
+    { role: 'system', content: 'You write for an event director at Q8nten, an event agency. Three plain sentences about this event: what sponsors and exhibitors have booked, what is committed against the production budget and which budget lines are over plan, and the most recent change, including amendments (a higher version replaces the older one). No bullet points.' },
+    { role: 'user', content: `Event: ${payload.name}\nPosition: ${JSON.stringify(position)}\nRecent documents, oldest first:\n${recent.join('\n')}` },
   ],
 };
 return [{ json: { payload, body } }];

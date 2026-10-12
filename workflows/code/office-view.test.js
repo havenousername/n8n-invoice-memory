@@ -31,7 +31,7 @@ test('a Berlin day sums costs per category against the budget', () => {
     row({ key: 'PO-5001', category: 'gpu', amount: 40000 }),
     row({ key: 'PO-5002', category: 'travel', amount: 12000 }),
   ]);
-  assert.deepEqual(line(payload, 'gpu'), { category: 'gpu', name: 'GPU compute', budget: 120000, committed: 130000, credited: 0, remaining: -10000, over_by: 10000 });
+  assert.deepEqual(line(payload, 'gpu'), { category: 'gpu', name: 'Stage and AV', budget: 120000, committed: 130000, credited: 0, remaining: -10000, over_by: 10000 });
   assert.equal(line(payload, 'travel').remaining, 48000);
   assert.deepEqual(payload.lines.map((l) => l.category), ['people', 'cloud', 'gpu', 'office', 'travel']);
   assert.equal(payload.budget, 1275000);
@@ -60,7 +60,7 @@ test('credit larger than committed: committed stays at zero', () => {
     row({ key: 'PO-5001', category: 'cloud', amount: 20000 }),
     row({ key: 'CN-7000', type: 'credit', category: 'cloud', amount: 25000 }),
   ]);
-  assert.deepEqual(line(payload, 'cloud'), { category: 'cloud', name: 'Cloud infrastructure', budget: 180000, committed: 0, credited: 25000, remaining: 180000, over_by: 0 });
+  assert.deepEqual(line(payload, 'cloud'), { category: 'cloud', name: 'Marketing', budget: 180000, committed: 0, credited: 25000, remaining: 180000, over_by: 0 });
 });
 
 test('deals are booked, not committed', () => {
@@ -120,7 +120,7 @@ test('texts: one digest line per current document, raw text plus descriptions fo
     row({ key: 'PO-1042', version: 1, amount: 48000, text: 'Belegnummer: PO-1042 alt' }),
     row({ key: 'PO-1042', version: 2, amount: 132000, text: 'Belegnummer: PO-1042 neu' }),
   ]);
-  assert.deepEqual(texts.digest.split('\n'), ['PO-1042 v2 | 2026-10-06 | Commitment | GPU compute | Rechenwerk Systems GmbH | 132000.00 EUR | PO-1042 description']);
+  assert.deepEqual(texts.digest.split('\n'), ['PO-1042 v2 | 2026-10-06 | Supplier order | Stage and AV | Rechenwerk Systems GmbH | 132000.00 EUR | PO-1042 description']);
   assert.match(texts.bm25, /PO-1042 alt/);
   assert.match(texts.bm25, /PO-1042 neu/);
   assert.match(texts.bm25, /PO-1042 description/);

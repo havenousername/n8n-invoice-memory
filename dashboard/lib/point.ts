@@ -4,7 +4,7 @@
 import { euro } from './format';
 import type { DocumentEntry, OfficeCard } from './shape';
 
-const TYPE_NAMES: Record<string, string> = { cost: 'Commitment', deal: 'Deal', credit: 'Credit note' };
+const TYPE_NAMES: Record<string, string> = { cost: 'Supplier order', deal: 'Customer order', credit: 'Credit note' };
 
 export type PayloadRow = { id: string; label: string; amount: string; status: DocumentEntry['status']; stage: number };
 export type Anatomy = { shortId: string; shard: string; rows: PayloadRow[]; digest: string[]; bm25Documents: number };

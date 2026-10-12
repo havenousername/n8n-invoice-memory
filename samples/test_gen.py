@@ -2,21 +2,22 @@ import unittest
 
 from gen import CATEGORIES, offices, static_documents
 
+# Event budgets per line, in CATEGORIES order: crew, marketing, stage and AV, venue, catering.
 BUDGETS = {
-    "berlin": (820000, 180000, 120000, 95000, 60000),
-    "munich": (760000, 140000, 210000, 90000, 50000),
-    "vienna": (540000, 90000, 60000, 70000, 40000),
-    "amsterdam": (610000, 150000, 90000, 80000, 55000),
-    "paris": (700000, 120000, 140000, 110000, 70000),
-    "london": (880000, 200000, 160000, 130000, 90000),
+    "berlin": (160000, 90000, 120000, 220000, 180000),
+    "munich": (120000, 70000, 150000, 160000, 140000),
+    "vienna": (90000, 50000, 80000, 120000, 100000),
+    "amsterdam": (110000, 80000, 100000, 150000, 130000),
+    "paris": (130000, 100000, 140000, 200000, 160000),
+    "london": (170000, 140000, 160000, 260000, 210000),
 }
 PEOPLE = {
-    "berlin": ("ber", "Berlin", "Central", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01"),
-    "munich": ("muc", "Munich", "Central", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01"),
-    "vienna": ("vie", "Vienna", "Central", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01"),
-    "amsterdam": ("ams", "Amsterdam", "West", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01"),
-    "paris": ("par", "Paris", "West", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01"),
-    "london": ("lon", "London", "West", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01"),
+    "berlin": ("ber", "DevSummit Berlin", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01"),
+    "munich": ("muc", "CloudTage München", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01"),
+    "vienna": ("vie", "AI Forum Wien", "DACH", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01"),
+    "amsterdam": ("ams", "DataWeek Amsterdam", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01"),
+    "paris": ("par", "Paris Tech Days", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01"),
+    "london": ("lon", "FinTech Expo London", "International", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01"),
 }
 
 
@@ -66,8 +67,9 @@ class StaticDocumentsTest(unittest.TestCase):
         self.assertGreater(v2["amount"], v1["amount"])
         self.assertGreater(v2["amount"], self.offices["berlin"]["budgets"]["gpu"])
         self.assertEqual(v2["category"], "gpu")
-        self.assertIn("GPU servers", v2["description_en"])
-        self.assertIn("inference launch", v2["description_en"])
+        self.assertEqual(v2["counterparty"], "Lichtwerk Veranstaltungstechnik GmbH")
+        self.assertIn("LED walls", v2["description_en"])
+        self.assertIn("sponsor keynote", v2["description_en"])
 
     def test_copy_is_a_duplicate_of_the_original(self):
         copy, original = self.docs["ber-po-1042-v1-copy.pdf"], self.docs["ber-po-1042-v1.pdf"]
@@ -78,11 +80,12 @@ class StaticDocumentsTest(unittest.TestCase):
     def test_munich_booth_document(self):
         d = self.docs["muc-po-2041-v1.pdf"]
         self.assertEqual((d["office_id"], d["doc_type"], d["counterparty"], d["category"], d["amount"]),
-                         ("munich", "cost", "Hetzner Online GmbH", "cloud", 12300.0))
+                         ("munich", "cost", "Isar Catering GmbH", "travel", 12300.0))
 
     def test_gate_documents_cover_a_deal_and_a_credit(self):
         deal, credit = self.docs["ams-deal-3101-v1.pdf"], self.docs["par-cn-4101-v1.pdf"]
-        self.assertEqual((deal["doc_type"], deal["category"]), ("deal", None))
+        self.assertEqual((deal["doc_type"], deal["category"], deal["amount"]), ("deal", None, 60000.0))
+        self.assertIn("sponsorship", deal["description_en"])
         self.assertEqual(credit["doc_type"], "credit")
         self.assertIn(credit["category"], CATEGORIES)
 

@@ -25,7 +25,7 @@ export function DayControls() {
     <>
       <section className="rail-section" aria-label="AI working day">
         <p className="eyebrow">AI working day</p>
-        <p className="rail-note">AI workers file documents into the offices, one every ~15 s.</p>
+        <p className="rail-note">AI producers file supplier orders, sponsor and exhibitor bookings, and their changes into the six events, one every ~15 s.</p>
         <div className="day-row">
           <label className="count">documents
             <input className="input num" type="number" min={1} max={40} value={count} onChange={(e) => setCount(Number(e.target.value))} />
@@ -40,9 +40,9 @@ export function DayControls() {
       <section className="rail-section reset" aria-label="Reset">
         {confirming ? (
           <div className="confirm">
-            <span>Clear every document and start the offices empty?</span>
+            <span>Clear every document and start the six events empty?</span>
             <button type="button" className="btn danger" disabled={busy !== null}
-              onClick={() => { setConfirming(false); void run('reset', '/api/reset', {}, 'reset: six empty offices'); }}>Reset</button>
+              onClick={() => { setConfirming(false); void run('reset', '/api/reset', {}, 'reset: six empty events'); }}>Reset</button>
             <button type="button" className="btn ghost" onClick={() => setConfirming(false)}>Cancel</button>
           </div>
         ) : (

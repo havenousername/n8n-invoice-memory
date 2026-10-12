@@ -33,6 +33,9 @@ Success at the booth:
 
 ## 2. Domain
 
+**Use case, 2026-10-12 (owner decision, replaces the software-company story below where they differ): Q8nten GmbH is an event agency.** Six conferences are in production for Q4 2026; a stream of PDFs reads as a full order book. Sponsors and exhibitors book in all day (KUNDENAUFTRAG, money in), suppliers are ordered against each event's production budget (BESTELLUNG), suppliers credit cancellations (GUTSCHRIFT), orders grow (amendments), and signed contracts arrive twice (duplicates). Anna (DACH): DevSummit Berlin, CloudTage München, AI Forum Wien; Ben (International): DataWeek Amsterdam, Paris Tech Days, FinTech Expo London. The five budget lines keep their internal keys: `people` Personal und Crew (Crew and staffing), `cloud` Marketing und Werbung (Marketing), `gpu` Bühne und Technik (Stage and AV), `office` Veranstaltungsort (Venue), `travel` Catering. Booth beats: DevSummit Berlin PO-1042 v1, main stage light and sound, 48.000 €; CloudTage München PO-2041, catering for 300 guests, 12.300 €; the same Berlin contract again; PO-1042 v2, two LED walls and a second stage for the sponsor keynote track, 132.000 €, Stage and AV over plan. The AI working day's code hands out the mix (per 12 slots: 4 supplier orders, 4 customer orders, 1 supplier and 1 customer amendment, 1 credit note, 1 resend); the model writes only the content. Internal ids (`office_id`, the `offices` collection and table) are unchanged; the pipeline is unchanged.
+
+
 **Company:** Q8nten GmbH (fictional). Quarter: Q4 2026; documents are dated October 2026.
 
 **Tenants and offices.** Shard keys `m_anna` and `m_ben` are unchanged.

@@ -5,10 +5,10 @@ Belegnummer: CN-4101
 Version: 1
 Datum: 09.10.2026
 Kostenstelle: CC-PAR-01
-Standort: Paris
-Lieferant: Atelier Cloud SAS
-Kategorie: Cloud-Infrastruktur
-Beschreibung: Gutschrift für den Ausfall im September
+Standort: Paris Tech Days
+Lieferant: Salle Lumière SAS
+Kategorie: Veranstaltungsort
+Beschreibung: Gutschrift für den stornierten Breakout-Raum
 
 Betrag: 4.800,00 €
 Eingereicht von: Jules

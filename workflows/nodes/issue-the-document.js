@@ -9,7 +9,7 @@ try {
 } catch {
   throw new Error('worker reply is not bare JSON');
 }
-const event = checkEvent(proposed, office, prep.recent);
+const event = checkEvent(proposed, office, prep.recent, prep.slot);
 const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 const { doc, filename, resend_of } = toDocument(event, office, prep.recent, prep.numbers, now);
 return [{ json: {

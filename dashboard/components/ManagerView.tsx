@@ -77,7 +77,7 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
     <div className="shell">
       <header className="header">
         <span className="brand-name">Q8nten</span>
-        <span className="brand-sub">documents by <b className="n8n">n8n</b> · memory in <b className="qdrant">Qdrant</b></span>
+        <span className="brand-sub">event agency · documents by <b className="n8n">n8n</b> · memory in <b className="qdrant">Qdrant</b></span>
         <span className="header-spacer" />
         <ShardSwap manager={manager} swappedFrom={swap && now - swap.at < SWAP_MS ? swap.from : null} onSwitch={switchTo} />
         <Live feed={feed} />
@@ -102,7 +102,7 @@ export function Live({ feed }: { feed: Feed }) {
   return (
     <span className={`live${feed.offline ? ' offline' : ''}`} role="status">
       <span className="live-dot" aria-hidden="true" />
-      {feed.offline ? 'offline, last known offices' : feed.tookMs !== null ? <>live · <span className="num">{feed.tookMs} ms</span></> : 'connecting…'}
+      {feed.offline ? 'offline, last known events' : feed.tookMs !== null ? <>live · <span className="num">{feed.tookMs} ms</span></> : 'connecting…'}
     </span>
   );
 }

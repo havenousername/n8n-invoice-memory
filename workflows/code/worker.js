@@ -1,70 +1,105 @@
-// The AI workers: which office acts next, what the model is asked, and how its answer becomes a document.
-// The model only proposes; code checks every value and assigns keys and versions. Pasted into n8n Code nodes
-// without the module.exports line.
+// The AI workers of Q8nten, an event agency: which event acts next and what happens to it, what the model is asked,
+// and how its answer becomes a document. Code decides the action of every slot, so customers, amendments, credits,
+// and resends really appear; the model only writes the content, and code checks every value and assigns keys and
+// versions. Pasted into n8n Code nodes without the module.exports line.
 
 const WORKER_ACTIONS = ['new_cost', 'new_deal', 'new_credit', 'amend', 'resend'];
 const WORKER_NEW_TYPES = { new_cost: 'cost', new_deal: 'deal', new_credit: 'credit' };
 const WORKER_CATEGORIES = ['people', 'cloud', 'gpu', 'office', 'travel'];
 const WORKER_KEYS = { cost: ['PO', 5000], deal: ['DEAL', 6000], credit: ['CN', 7000] };
 const WORKER_COST_SHARE = 0.4;
+/** Every 12 slots hand out this mix: as many customer orders as supplier orders, and every kind of change. */
+const WORKER_MIX = ['new_cost', 'new_cost', 'new_cost', 'new_cost', 'new_deal', 'new_deal', 'new_deal', 'new_deal',
+  'amend_cost', 'amend_deal', 'new_credit', 'resend'];
 const WORKER_PROMPT = [
-  'You play the controller of one office of Q8nten GmbH, a software company, during Q4 2026.',
-  'Propose the next business document for this office as JSON.',
-  'Actions: new_cost (a purchase commitment to a supplier), new_deal (a client deal), new_credit (a credit note from a supplier),',
-  'amend (a new version of one recent document with the same key and a new total amount), resend (the same recent document sent again).',
-  'Mostly new costs, some deals, now and then a credit note, an amendment, or a resend.',
-  'target_key: for amend and resend, one key from the recent list; otherwise an empty string.',
-  'category: people, cloud, gpu, office, or travel for costs and credit notes; none for deals.',
-  'amount: EUR between 1000 and 999999; one commitment stays within 40% of its category budget.',
-  'counterparty: a plausible company (a supplier for costs and credit notes, a client for deals).',
+  'You play an event producer at Q8nten GmbH, an event agency, during Q4 2026.',
+  'You write the next document for one of its events, as JSON. The action is already decided; write its content.',
+  'Supplier orders (new_cost) buy for the event: crew and staffing (people), marketing (cloud), stage, light, sound and video (gpu),',
+  'the venue and rooms (office), or catering (travel). Customer orders (new_deal) are sponsors and exhibitors booking in:',
+  'sponsorship packages, exhibition stands, ticket contingents; category none. Credit notes (new_credit) come from suppliers:',
+  'a cancelled room, refunded no-shows, a short delivery. Amendments (amend) give a new total for the target_key: usually the',
+  'event is growing or a sponsor upgrades. Resends (resend) name the target_key of a document that arrives a second time.',
+  'target_key: one of the allowed keys for amend and resend, otherwise an empty string.',
+  'amount: EUR between 1000 and 999999; one supplier order stays within 40% of its budget line.',
+  'counterparty: a plausible company (a supplier for orders and credit notes, the sponsor or exhibitor for customer orders).',
   'description_de: one short German line as printed on the document; description_en: its English translation.',
 ].join(' ');
-const WORKER_SCHEMA = {
-  type: 'object',
-  properties: {
-    action: { type: 'string', enum: WORKER_ACTIONS },
-    target_key: { type: 'string', description: 'a recent key for amend or resend, else empty' },
-    counterparty: { type: 'string' },
-    category: { type: 'string', enum: [...WORKER_CATEGORIES, 'none'] },
-    amount: { type: 'number', description: 'EUR' },
-    description_de: { type: 'string' },
-    description_en: { type: 'string' },
-  },
-  required: ['action', 'target_key', 'counterparty', 'category', 'amount', 'description_de', 'description_en'],
-  additionalProperties: false,
+const WORKER_SLOT = {
+  new_cost: 'This slot: a new supplier order for this event.',
+  new_deal: 'This slot: a new customer order, a sponsor or exhibitor books in.',
+  new_credit: 'This slot: a supplier credit note.',
+  amend_cost: 'This slot: a supplier order changes; give its new total.',
+  amend_deal: 'This slot: a sponsor or exhibitor order changes (an upgrade, a bigger stand); give its new total.',
+  resend: 'This slot: one of the documents arrives a second time; name its key.',
 };
 
-// Each round is a fresh shuffle of every office, so any two rounds (12 slots for six offices) hold each office twice.
+function workerSchema(slot) {
+  return {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: [slot.action] },
+      target_key: { type: 'string', enum: slot.targets.length ? slot.targets : [''] },
+      counterparty: { type: 'string' },
+      category: { type: 'string', enum: [...WORKER_CATEGORIES, 'none'] },
+      amount: { type: 'number', description: 'EUR' },
+      description_de: { type: 'string' },
+      description_en: { type: 'string' },
+    },
+    required: ['action', 'target_key', 'counterparty', 'category', 'amount', 'description_de', 'description_en'],
+    additionalProperties: false,
+  };
+}
+
+// Each round is a fresh shuffle of every office, so any 12 slots hold each of six offices twice; actions come from a
+// shuffled bag of WORKER_MIX, so any 12 slots hold the whole mix.
 function planSlots(count, offices, random) {
-  const slots = [];
-  while (slots.length < count) {
-    const round = offices.slice();
-    for (let i = round.length - 1; i > 0; i--) {
+  const shuffle = (items) => {
+    const out = items.slice();
+    for (let i = out.length - 1; i > 0; i--) {
       const j = Math.floor(random() * (i + 1));
-      [round[i], round[j]] = [round[j], round[i]];
+      [out[i], out[j]] = [out[j], out[i]];
     }
-    slots.push(...round.map((o) => ({ office_id: o.office_id })));
-  }
-  return slots.slice(0, count);
+    return out;
+  };
+  const places = [];
+  while (places.length < count) places.push(...shuffle(offices).map((o) => o.office_id));
+  const actions = [];
+  while (actions.length < count) actions.push(...shuffle(WORKER_MIX));
+  return places.slice(0, count).map((office_id, i) => ({ office_id, action: actions[i] }));
+}
+
+// The planned action against what the office really has: an amendment needs an original of its kind, a resend any
+// original; without one the slot becomes a new order of the same side.
+function resolveAction(planned, recent) {
+  const keys = (type) => [...new Set(workerOriginals(recent).filter((r) => !type || r.doc_type === type).map((r) => r.doc_key))];
+  if (planned === 'amend_cost') return keys('cost').length ? { action: 'amend', targets: keys('cost'), side: 'cost' } : { action: 'new_cost', targets: [] };
+  if (planned === 'amend_deal') return keys('deal').length ? { action: 'amend', targets: keys('deal'), side: 'deal' } : { action: 'new_deal', targets: [] };
+  if (planned === 'resend') return keys().length ? { action: 'resend', targets: keys() } : { action: 'new_deal', targets: [] };
+  return { action: planned, targets: [] };
 }
 
 // `office` carries its budgets and, when the caller knows it, its committed position per category.
-function workerRequest(office, recent, model) {
+function workerRequest(office, recent, model, slot) {
   const context = {
-    office: office.name, cost_center: office.cost_center, budgets: office.budgets, committed: office.committed || {},
+    event: office.name, cost_center: office.cost_center, budgets: office.budgets, committed: office.committed || {},
     recent: workerOriginals(recent).map((r) => ({ key: r.doc_key, version: r.version, type: r.doc_type, category: r.category,
       amount: r.amount, description: r.description_en })),
+    allowed_targets: slot.targets,
   };
+  const instruction = WORKER_SLOT[slot.action === 'amend' ? `amend_${slot.side}` : slot.action];
   return {
     model, temperature: 0.9, max_tokens: 400,
-    response_format: { type: 'json_schema', json_schema: { name: 'business_event', strict: true, schema: WORKER_SCHEMA } },
-    messages: [{ role: 'system', content: WORKER_PROMPT }, { role: 'user', content: JSON.stringify(context) }],
+    response_format: { type: 'json_schema', json_schema: { name: 'business_event', strict: true, schema: workerSchema(slot) } },
+    messages: [{ role: 'system', content: WORKER_PROMPT }, { role: 'user', content: `${instruction}\n${JSON.stringify(context)}` }],
   };
 }
 
-// Throws the reason a proposed event is rejected; returns it normalized otherwise.
-function checkEvent(event, office, recent) {
+// Throws the reason a proposed event is rejected; returns it normalized otherwise. With a slot, the event must be the
+// slot's action and name one of its targets.
+function checkEvent(event, office, recent, slot) {
   if (!WORKER_ACTIONS.includes(event.action)) throw new Error(`bad action ${event.action}`);
+  if (slot && event.action !== slot.action) throw new Error(`unexpected action ${event.action}`);
+  if (slot && slot.targets.length && !slot.targets.includes(event.target_key)) throw new Error(`unknown target_key ${event.target_key}`);
   const isNew = Object.hasOwn(WORKER_NEW_TYPES, event.action);
   const target = isNew ? null : workerLatest(event.target_key, recent);
   if (!isNew && !target) throw new Error(`unknown target_key ${event.target_key}`);
@@ -143,4 +178,4 @@ function workerFilename(office, doc) {
   return `${office.code}-${doc.doc_key.toLowerCase()}-v${doc.version}.pdf`;
 }
 
-module.exports = { planSlots, workerRequest, checkEvent, toDocument };
+module.exports = { planSlots, resolveAction, workerRequest, checkEvent, toDocument };

@@ -15,7 +15,7 @@ test('a static file resolves from the booth pool with its PDF inlined', async ()
   const v = item.json;
   assert.match(v.document_id, /^doc_[a-z0-9]+$/);
   assert.deepEqual([v.office_id, v.manager_id, v.worker_id, v.office_name, v.filename],
-    ['berlin', 'm_anna', 'w_tom', 'Berlin', 'ber-po-1042-v1-copy.pdf']);
+    ['berlin', 'm_anna', 'w_tom', 'DevSummit Berlin', 'ber-po-1042-v1-copy.pdf']);
   assert.equal(v.pdf_base64, SAMPLE('ber-po-1042-v1-copy.pdf').toString('base64'));
   assert.match(v.received_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 });

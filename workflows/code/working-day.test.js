@@ -34,19 +34,29 @@ const ISSUED = [
   issued('berlin', 'PO-5000', 2, 'cost', 'gpu', 45000, 5),
   issued('berlin', 'PO-5000', 2, 'cost', 'gpu', 45000, 6, { resend_of: 'ber-po-5000-v2.pdf', filename: 'ber-po-5000-v2-copy.pdf' }),
 ];
-const prepare = (office_id, rows = ISSUED) => runCodeNode(workflow, 'Prepare the worker request', {
-  upstream: { Config: [CONFIG], 'Loop over slots': [{ slot: 1, office_id }], 'Read the issued documents': rows },
+const prepare = (office_id, rows = ISSUED, action = 'new_cost') => runCodeNode(workflow, 'Prepare the worker request', {
+  upstream: { Config: [CONFIG], 'Loop over slots': [{ slot: 1, office_id, action }], 'Read the issued documents': rows },
 });
+const contextOf = (body) => JSON.parse(body.messages[1].content.split('\n').slice(1).join('\n'));
 
 test('the request shows the office its own recent documents and its committed position', async () => {
   const [item] = await prepare('berlin');
   const { recent, numbers, body } = item.json;
   assert.deepEqual(recent.map((r) => r.issued_id), ['iss_1', 'iss_3', 'iss_4', 'iss_5', 'iss_6']);
   assert.deepEqual(numbers, ['PO-5000', 'PO-5001', 'CN-7000', 'DEAL-6000', 'PO-5000', 'PO-5000']);
-  const context = JSON.parse(body.messages[1].content);
+  const context = contextOf(body);
   assert.equal(context.cost_center, 'CC-BER-01');
+  assert.equal(context.event, 'DevSummit Berlin');
   assert.deepEqual(context.committed, { gpu: 40000 }, 'v2 replaces v1, the credit gives back, the resend and the deal do not count');
   assert.equal(body.model, 'anthropic/claude-haiku-5.5');
+});
+
+test('the planned action is resolved against the event: an amendment may only name what it has', async () => {
+  const [deal] = await prepare('berlin', ISSUED, 'amend_deal');
+  assert.deepEqual(deal.json.slot, { action: 'amend', targets: ['DEAL-6000'], side: 'deal' });
+  assert.deepEqual(deal.json.body.response_format.json_schema.schema.properties.target_key.enum, ['DEAL-6000']);
+  const [fallback] = await prepare('london', [{}], 'resend');
+  assert.deepEqual(fallback.json.slot, { action: 'new_deal', targets: [] });
 });
 
 test('only the last eight documents are shown, and an empty table is a quiet office', async () => {
@@ -58,15 +68,15 @@ test('only the last eight documents are shown, and an empty table is a quiet off
   assert.deepEqual([quiet.json.recent, quiet.json.numbers], [[], []]);
 });
 
-const issue = async (proposed, office_id = 'berlin') => {
-  const [prep] = await prepare(office_id);
+const issue = async (proposed, action = 'new_deal', office_id = 'berlin') => {
+  const [prep] = await prepare(office_id, ISSUED, action);
   return runCodeNode(workflow, 'Issue the document', {
     upstream: { 'Prepare the worker request': [prep.json] },
     input: [{ json: { choices: [{ message: { content: JSON.stringify(proposed) } }] } }],
   });
 };
-const EVENT = { action: 'new_deal', target_key: '', counterparty: 'Van Dijk Logistics B.V.', category: 'none', amount: 250000,
-  description_de: 'Jahreslizenz Plattform', description_en: 'Platform licence, one year' };
+const EVENT = { action: 'new_deal', target_key: '', counterparty: 'Nordzee Data B.V.', category: 'none', amount: 60000,
+  description_de: 'Gold-Sponsoring inklusive Keynote-Slot', description_en: 'Gold sponsorship including a keynote slot' };
 
 test('an accepted event becomes a rendered PDF for 01b and an issued row', async () => {
   const [item] = await issue(EVENT);
@@ -83,17 +93,18 @@ test('an accepted event becomes a rendered PDF for 01b and an issued row', async
 });
 
 test('a resend is byte-identical to the original it repeats', async () => {
-  const [item] = await issue({ ...EVENT, action: 'resend', target_key: 'PO-5000' });
+  const [item] = await issue({ ...EVENT, action: 'resend', target_key: 'PO-5000' }, 'resend');
   assert.equal(item.json.filename, 'ber-po-5000-v2-copy.pdf');
   assert.equal(item.json.issued.resend_of, 'ber-po-5000-v2.pdf');
-  const OFFICES_BERLIN = { name: 'Berlin', cost_center: 'CC-BER-01', worker_name: 'Tom' };
+  const OFFICES_BERLIN = { name: 'DevSummit Berlin', cost_center: 'CC-BER-01', worker_name: 'Tom' };
   const original = renderPdf({ ...ISSUED[4], category: 'gpu' }, OFFICES_BERLIN);
   assert.deepEqual(Buffer.from(item.json.pdf_base64, 'base64'), Buffer.from(original));
 });
 
 test('a rejected event yields no document: the reason goes to the error output', async () => {
   await assert.rejects(issue({ ...EVENT, category: 'cloud' }), /category on a deal/);
-  await assert.rejects(issue({ ...EVENT, action: 'amend', target_key: 'PO-9999' }), /unknown target_key/);
+  await assert.rejects(issue({ ...EVENT, action: 'amend', target_key: 'PO-9999' }, 'amend_cost'), /unknown target_key/);
+  await assert.rejects(issue({ ...EVENT, action: 'new_cost', category: 'gpu', amount: 5000 }, 'new_deal'), /unexpected action new_cost/);
   await assert.rejects(runCodeNode(workflow, 'Issue the document', {
     upstream: { 'Prepare the worker request': [{ office_id: 'berlin', recent: [], numbers: [] }] },
     input: [{ json: { choices: [{ message: { content: '```json {}```' } }] } }],

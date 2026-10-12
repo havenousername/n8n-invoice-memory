@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { planSlots, workerRequest, checkEvent, toDocument } = require('./worker');
+const { planSlots, resolveAction, workerRequest, checkEvent, toDocument } = require('./worker');
 const { renderPdf } = require('./pdf');
 
 const OFFICES = ['berlin', 'munich', 'vienna', 'amsterdam', 'paris', 'london'].map((office_id) => ({ office_id }));
@@ -26,27 +26,52 @@ const event = (fields) => ({
 });
 const seeded = (seed) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 
-test('slots cover all six offices in every burst of 12', () => {
+test('every burst of 12 visits all six offices twice and hands out the full mix of actions', () => {
   for (const seed of [1, 7, 42, 1234, 99991]) {
     const slots = planSlots(12, OFFICES, seeded(seed));
     assert.equal(slots.length, 12);
     assert.deepEqual(new Set(slots.map((s) => s.office_id)), new Set(OFFICES.map((o) => o.office_id)), `seed ${seed}`);
+    const mix = {};
+    for (const s of slots) mix[s.action] = (mix[s.action] || 0) + 1;
+    assert.deepEqual(mix, { new_cost: 4, new_deal: 4, amend_cost: 1, amend_deal: 1, new_credit: 1, resend: 1 }, `seed ${seed}`);
   }
   assert.equal(planSlots(5, OFFICES, seeded(3)).length, 5);
+  assert.equal(planSlots(30, OFFICES, seeded(3)).filter((s) => s.action === 'new_deal').length >= 8, true);
 });
 
-test('the request is strict, offers the five actions, and shows the recent keys', () => {
-  const body = workerRequest(BERLIN, RECENT, 'anthropic/claude-haiku-5.5');
+test('an amendment or resend targets only what the office really has, else becomes a new order', () => {
+  assert.deepEqual(resolveAction('amend_cost', RECENT), { action: 'amend', targets: ['PO-5000'], side: 'cost' });
+  assert.deepEqual(resolveAction('amend_deal', RECENT), { action: 'amend', targets: ['DEAL-6000'], side: 'deal' });
+  assert.deepEqual(resolveAction('resend', RECENT), { action: 'resend', targets: ['PO-5000', 'DEAL-6000'] });
+  assert.deepEqual(resolveAction('amend_deal', RECENT.filter((r) => r.doc_type === 'cost')), { action: 'new_deal', targets: [] });
+  assert.deepEqual(resolveAction('amend_cost', []), { action: 'new_cost', targets: [] });
+  assert.deepEqual(resolveAction('resend', []), { action: 'new_deal', targets: [] });
+  assert.deepEqual(resolveAction('new_credit', RECENT), { action: 'new_credit', targets: [] });
+});
+
+test('the request is strict and allows only the action of the slot and real targets', () => {
+  const body = workerRequest(BERLIN, RECENT, 'anthropic/claude-haiku-5.5', resolveAction('amend_cost', RECENT));
   assert.equal(body.model, 'anthropic/claude-haiku-5.5');
   const { json_schema } = body.response_format;
   assert.equal(body.response_format.type, 'json_schema');
   assert.equal(json_schema.strict, true);
   assert.equal(json_schema.schema.additionalProperties, false);
-  assert.deepEqual(json_schema.schema.properties.action.enum, ['new_cost', 'new_deal', 'new_credit', 'amend', 'resend']);
+  assert.deepEqual(json_schema.schema.properties.action.enum, ['amend']);
+  assert.deepEqual(json_schema.schema.properties.target_key.enum, ['PO-5000']);
   assert.deepEqual(json_schema.schema.required.sort(),
     ['action', 'amount', 'category', 'counterparty', 'description_de', 'description_en', 'target_key']);
   const prompt = body.messages.map((m) => m.content).join('\n');
-  for (const s of ['PO-5000', 'DEAL-6000', 'CC-BER-01', '120000', '48000']) assert.ok(prompt.includes(s), s);
+  for (const s of ['PO-5000', 'DEAL-6000', 'CC-BER-01', '120000', '48000', 'event agency', 'supplier order changes']) assert.ok(prompt.includes(s), s);
+  const fresh = workerRequest(BERLIN, RECENT, 'm', resolveAction('new_deal', RECENT));
+  assert.deepEqual(fresh.response_format.json_schema.schema.properties.target_key.enum, ['']);
+  assert.match(fresh.messages[1].content, /sponsor or exhibitor/);
+});
+
+test('an event that does not follow its slot is rejected', () => {
+  const slot = resolveAction('amend_cost', RECENT);
+  assert.throws(() => checkEvent(event({ action: 'new_cost' }), BERLIN, RECENT, slot), /unexpected action new_cost/);
+  assert.throws(() => checkEvent(event({ action: 'amend', target_key: 'DEAL-6000', category: 'none' }), BERLIN, RECENT, slot), /unknown target_key/);
+  assert.equal(checkEvent(event({ action: 'amend', target_key: 'PO-5000', category: 'none', amount: 45000 }), BERLIN, RECENT, slot).target_key, 'PO-5000');
 });
 
 test('rejected events: each reason', () => {

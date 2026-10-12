@@ -1,4 +1,4 @@
-"""Q8nten GmbH: the offices, their Q4 budgets, and the static documents the booth relies on.
+"""Q8nten GmbH, an event agency: its six events in production, their Q4 budgets, and the static booth documents.
 
 Run: python3 samples/gen.py writes offices.json and manifest.json; node samples/render.mjs renders the PDFs.
 The live stream of documents is written by the AI workers in n8n (00 Working day), not here.
@@ -11,28 +11,32 @@ from pathlib import Path
 SAMPLES_DIR = Path(__file__).resolve().parent
 CATEGORIES = ("people", "cloud", "gpu", "office", "travel")
 
+# Internal ids stay office_id/code and the five category keys; what people see is the event and the budget line.
+# Category keys -> lines: people = crew and staffing, cloud = marketing, gpu = stage and AV, office = venue,
+# travel = catering (German labels in workflows/code/pdf.js).
 # office_id: code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, budgets in CATEGORIES order
 _OFFICES = (
-    ("berlin", "ber", "Berlin", "Central", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01", (820000, 180000, 120000, 95000, 60000)),
-    ("munich", "muc", "Munich", "Central", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01", (760000, 140000, 210000, 90000, 50000)),
-    ("vienna", "vie", "Vienna", "Central", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01", (540000, 90000, 60000, 70000, 40000)),
-    ("amsterdam", "ams", "Amsterdam", "West", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01", (610000, 150000, 90000, 80000, 55000)),
-    ("paris", "par", "Paris", "West", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01", (700000, 120000, 140000, 110000, 70000)),
-    ("london", "lon", "London", "West", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01", (880000, 200000, 160000, 130000, 90000)),
+    ("berlin", "ber", "DevSummit Berlin", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01", (160000, 90000, 120000, 220000, 180000)),
+    ("munich", "muc", "CloudTage München", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01", (120000, 70000, 150000, 160000, 140000)),
+    ("vienna", "vie", "AI Forum Wien", "DACH", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01", (90000, 50000, 80000, 120000, 100000)),
+    ("amsterdam", "ams", "DataWeek Amsterdam", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01", (110000, 80000, 100000, 150000, 130000)),
+    ("paris", "par", "Paris Tech Days", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01", (130000, 100000, 140000, 200000, 160000)),
+    ("london", "lon", "FinTech Expo London", "International", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01", (170000, 140000, 160000, 260000, 210000)),
 )
 
 # file, office_id, doc_type, doc_key, version, date, counterparty, category, amount, description_de, description_en, role
 _STATIC = (
-    ("ber-po-1042-v1.pdf", "berlin", "cost", "PO-1042", 1, "2026-10-06", "Rechenwerk Systems GmbH", "gpu", 48000.00,
-     "GPU-Server (4x) für den Inferenz-Launch, Anzahlung", "GPU servers (4x) for the inference launch, deposit", "booth"),
-    ("ber-po-1042-v2.pdf", "berlin", "cost", "PO-1042", 2, "2026-10-13", "Rechenwerk Systems GmbH", "gpu", 132000.00,
-     "GPU-Server (11x) für den Inferenz-Launch, Auftrag erweitert", "GPU servers (11x) for the inference launch, order expanded", "booth"),
-    ("muc-po-2041-v1.pdf", "munich", "cost", "PO-2041", 1, "2026-10-08", "Hetzner Online GmbH", "cloud", 12300.00,
-     "Dedizierte Server für die Staging-Umgebung, Oktober", "Dedicated servers for the staging environment, October", "booth"),
-    ("ams-deal-3101-v1.pdf", "amsterdam", "deal", "DEAL-3101", 1, "2026-10-07", "Van Dijk Logistics B.V.", None, 240000.00,
-     "Jahreslizenz Plattform, 120 Arbeitsplätze", "Annual platform license, 120 seats", "gate"),
-    ("par-cn-4101-v1.pdf", "paris", "credit", "CN-4101", 1, "2026-10-09", "Atelier Cloud SAS", "cloud", 4800.00,
-     "Gutschrift für den Ausfall im September", "Credit for the September outage", "gate"),
+    ("ber-po-1042-v1.pdf", "berlin", "cost", "PO-1042", 1, "2026-10-06", "Lichtwerk Veranstaltungstechnik GmbH", "gpu", 48000.00,
+     "Bühne, Licht und Ton für die Hauptbühne, Anzahlung", "Main stage light and sound, deposit", "booth"),
+    ("ber-po-1042-v2.pdf", "berlin", "cost", "PO-1042", 2, "2026-10-13", "Lichtwerk Veranstaltungstechnik GmbH", "gpu", 132000.00,
+     "Hauptbühne erweitert: zwei LED-Wände und eine zweite Bühne für den Sponsor-Keynote-Track",
+     "Main stage expanded: two LED walls and a second stage for the sponsor keynote track", "booth"),
+    ("muc-po-2041-v1.pdf", "munich", "cost", "PO-2041", 1, "2026-10-08", "Isar Catering GmbH", "travel", 12300.00,
+     "Catering für Konferenztag 1, 300 Gäste", "Catering for conference day 1, 300 guests", "booth"),
+    ("ams-deal-3101-v1.pdf", "amsterdam", "deal", "DEAL-3101", 1, "2026-10-07", "Nordzee Data B.V.", None, 60000.00,
+     "Gold-Sponsoring inklusive Keynote-Slot", "Gold sponsorship including a keynote slot", "gate"),
+    ("par-cn-4101-v1.pdf", "paris", "credit", "CN-4101", 1, "2026-10-09", "Salle Lumière SAS", "office", 4800.00,
+     "Gutschrift für den stornierten Breakout-Raum", "Credit for the cancelled breakout room", "gate"),
 )
 _DUPLICATES = (("ber-po-1042-v1-copy.pdf", "ber-po-1042-v1.pdf"),)
 

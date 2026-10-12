@@ -8,8 +8,8 @@ const COARSE_LABELS = ['Belegnummer', 'Version', 'Datum', 'Kostenstelle', 'Stand
 const COARSE_UNTIL = `(?=\\s+(?:${COARSE_LABELS.join('|')})\\b|\\n|$)`;
 const COARSE_TYPES = { BESTELLUNG: 'cost', KUNDENAUFTRAG: 'deal', GUTSCHRIFT: 'credit' };
 const COARSE_CATEGORIES = {
-  'Personal': 'people', 'Cloud-Infrastruktur': 'cloud', 'GPU-Rechenleistung': 'gpu',
-  'Büro und Ausstattung': 'office', 'Reisen und Events': 'travel',
+  'Personal und Crew': 'people', 'Marketing und Werbung': 'cloud', 'Bühne und Technik': 'gpu',
+  'Veranstaltungsort': 'office', 'Catering': 'travel',
 };
 
 function coarseRead(text) {

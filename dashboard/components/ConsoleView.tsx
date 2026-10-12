@@ -48,7 +48,7 @@ export function ConsoleView() {
                 ? <><b className="mono">{doc.doc_key ?? doc.filename}</b> · {focus.office.name} · {doc.kind === 'duplicate' ? 'duplicate' : stageName(doc.stage)}</>
                 : <b>Send a document.</b>}</span>
             </header>
-            <PipelineFlow state={state} docKey={doc?.document_id ?? ''} times={doc ? feed.times[doc.document_id] ?? {} : {}} pointName={focus?.office.name ?? 'office'} />
+            <PipelineFlow state={state} docKey={doc?.document_id ?? ''} times={doc ? feed.times[doc.document_id] ?? {} : {}} pointName={focus?.office.name ?? 'event'} />
             {last && <p className="last-event">last: {last.office_name} · {last.doc_key ?? last.filename ?? 'document'} · {last.kind}</p>}
           </section>
         </main>

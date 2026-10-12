@@ -1,6 +1,6 @@
 // Glue for "Prepare the worker request" in 00 Working day; worker.js and OFFICES are pasted above it.
-// The office's issued documents are its memory: the last 8 are shown to the model, all of them give its position,
-// and every key issued anywhere keeps new keys unique.
+// The event's issued documents are its memory: the last 8 are shown to the model, all of them give its position,
+// and every key issued anywhere keeps new keys unique. The planned action is resolved against what the event has.
 const slot = $('Loop over slots').first(1).json;
 const office = OFFICES.find((o) => o.office_id === slot.office_id);
 const issued = $('Read the issued documents').all().map((i) => i.json).filter((r) => r.issued_id);
@@ -16,9 +16,11 @@ for (const r of Object.values(current)) {
   committed[r.category] = (committed[r.category] || 0) + (r.doc_type === 'credit' ? -1 : 1) * Number(r.amount);
 }
 const recent = mine.slice(-8);
+const slotPlan = resolveAction(slot.action || 'new_cost', recent);
 return [{ json: {
   office_id: office.office_id,
   recent,
   numbers: issued.map((r) => r.doc_key),
-  body: workerRequest({ ...office, committed }, recent, $('Config').first().json.OPENROUTER_MODEL),
+  slot: slotPlan,
+  body: workerRequest({ ...office, committed }, recent, $('Config').first().json.OPENROUTER_MODEL, slotPlan),
 } }];

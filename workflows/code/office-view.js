@@ -1,7 +1,8 @@
 // The office point as a view over documents rows. Pasted into n8n Code nodes without the module.exports line.
 
-const VIEW_CATEGORIES = [['people', 'People'], ['cloud', 'Cloud infrastructure'], ['gpu', 'GPU compute'], ['office', 'Office and facilities'], ['travel', 'Travel and events']];
-const VIEW_TYPE_NAMES = { cost: 'Commitment', deal: 'Deal', credit: 'Credit note' };
+// Each event's five budget lines. The keys are internal slots shared with the vision schema; the names are what people read.
+const VIEW_CATEGORIES = [['people', 'Crew and staffing'], ['cloud', 'Marketing'], ['gpu', 'Stage and AV'], ['office', 'Venue'], ['travel', 'Catering']];
+const VIEW_TYPE_NAMES = { cost: 'Supplier order', deal: 'Customer order', credit: 'Credit note' };
 
 function computeOfficeView(office, rows, budgets, nowIso) {
   const entries = rows.map(viewEntry).sort((a, b) => a.received_at.localeCompare(b.received_at));
@@ -36,7 +37,7 @@ function computeOfficeView(office, rows, budgets, nowIso) {
   const over = lines.filter((l) => l.over_by > 0);
   const mechanical = `${office.name}: ${viewMoney(committed)} of ${viewMoney(budget)} committed (${pct(committed, budget)}%), `
     + (over.length ? `over plan in ${over.map((l) => l.name).join(' and ')}` : 'nothing over plan')
-    + `, ${dealCount} ${dealCount === 1 ? 'deal' : 'deals'} booked worth ${viewMoney(round2(booked))}.`;
+    + `, ${dealCount} sponsor and exhibitor ${dealCount === 1 ? 'order' : 'orders'} booked worth ${viewMoney(round2(booked))}.`;
 
   const payload = {
     office_id: office.office_id, manager_id: office.manager_id, name: office.name, region: office.region,

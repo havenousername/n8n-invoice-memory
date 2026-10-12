@@ -2,12 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { germanMoney, germanDate, documentLines, renderPdf } = require('./pdf');
 
-const BERLIN = { office_id: 'berlin', name: 'Berlin', cost_center: 'CC-BER-01', worker_name: 'Tom' };
+const BERLIN = { office_id: 'berlin', name: 'DevSummit Berlin', cost_center: 'CC-BER-01', worker_name: 'Tom' };
 const PO = {
-  doc_type: 'cost', doc_key: 'PO-1042', version: 1, date: '2026-10-06', counterparty: 'Rechenwerk Systems GmbH',
-  category: 'gpu', amount: 48000, description_de: 'GPU-Server (4x) für den Inferenz-Launch, Anzahlung',
+  doc_type: 'cost', doc_key: 'PO-1042', version: 1, date: '2026-10-06', counterparty: 'Lichtwerk Veranstaltungstechnik GmbH',
+  category: 'gpu', amount: 48000, description_de: 'Bühne, Licht und Ton für die Hauptbühne, Anzahlung',
 };
-const DEAL = { ...PO, doc_type: 'deal', doc_key: 'DEAL-3101', counterparty: 'Van Dijk Logistics B.V.', category: null, amount: 240000, description_de: 'Jahreslizenz Plattform' };
+const DEAL = { ...PO, doc_type: 'deal', doc_key: 'DEAL-3101', counterparty: 'Nordzee Data B.V.', category: null, amount: 60000, description_de: 'Gold-Sponsoring inklusive Keynote-Slot' };
 const CREDIT = { ...PO, doc_type: 'credit', doc_key: 'CN-4101', category: 'cloud', amount: 4800, description_de: 'Gutschrift für Ausfall' };
 const text = (bytes) => String.fromCharCode(...bytes);
 
@@ -21,7 +21,7 @@ test('German money and dates', () => {
 test('a purchase commitment carries every German label', () => {
   const lines = documentLines(PO, BERLIN).join('\n');
   for (const s of ['Q8nten GmbH', 'BESTELLUNG', 'Belegnummer: PO-1042', 'Version: 1', 'Datum: 06.10.2026', 'Kostenstelle: CC-BER-01',
-    'Lieferant: Rechenwerk Systems GmbH', 'Kategorie: GPU-Rechenleistung', 'Beschreibung: GPU-Server (4x) für den Inferenz-Launch, Anzahlung',
+    'Lieferant: Lichtwerk Veranstaltungstechnik GmbH', 'Kategorie: Bühne und Technik', 'Beschreibung: Bühne, Licht und Ton für die Hauptbühne, Anzahlung',
     'Betrag: 48.000,00 €', 'Synthetischer Beleg']) {
     assert.ok(lines.includes(s), s);
   }
@@ -34,8 +34,8 @@ test('an amendment says which version it replaces', () => {
 test('a deal has a client, an order value, and no category', () => {
   const lines = documentLines(DEAL, BERLIN).join('\n');
   assert.ok(lines.includes('KUNDENAUFTRAG'));
-  assert.ok(lines.includes('Kunde: Van Dijk Logistics B.V.'));
-  assert.ok(lines.includes('Auftragswert: 240.000,00 €'));
+  assert.ok(lines.includes('Kunde: Nordzee Data B.V.'));
+  assert.ok(lines.includes('Auftragswert: 60.000,00 €'));
   assert.ok(!lines.includes('Kategorie'));
   assert.ok(!lines.includes('Lieferant'));
 });
@@ -43,8 +43,8 @@ test('a deal has a client, an order value, and no category', () => {
 test('a credit note is a Gutschrift with a supplier and a category', () => {
   const lines = documentLines(CREDIT, BERLIN).join('\n');
   assert.ok(lines.includes('GUTSCHRIFT'));
-  assert.ok(lines.includes('Lieferant: Rechenwerk Systems GmbH'));
-  assert.ok(lines.includes('Kategorie: Cloud-Infrastruktur'));
+  assert.ok(lines.includes('Lieferant: Lichtwerk Veranstaltungstechnik GmbH'));
+  assert.ok(lines.includes('Kategorie: Marketing und Werbung'));
   assert.ok(lines.includes('Betrag: 4.800,00 €'));
 });
 

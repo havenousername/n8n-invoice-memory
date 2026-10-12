@@ -11,7 +11,7 @@ const NULLS = { doc_type: null, doc_key: null, version: null, date: null, cost_c
 test('a purchase commitment reads every field, the amount naively', () => {
   assert.deepEqual(coarseRead(fixture('muc-po-2041-v1.txt')), {
     doc_type: 'cost', doc_key: 'PO-2041', version: 1, date: '2026-10-08', cost_center: 'CC-MUC-01',
-    counterparty: 'Hetzner Online GmbH', category: 'cloud', amount: 12.3,
+    counterparty: 'Isar Catering GmbH', category: 'travel', amount: 12.3,
   });
 });
 
@@ -23,14 +23,14 @@ test('a client deal reads Kunde and Auftragswert and has no category', () => {
   const r = coarseRead(fixture('ams-deal-3101-v1.txt'));
   assert.equal(r.doc_type, 'deal');
   assert.equal(r.doc_key, 'DEAL-3101');
-  assert.equal(r.counterparty, 'Van Dijk Logistics B.V.');
+  assert.equal(r.counterparty, 'Nordzee Data B.V.');
   assert.equal(r.category, null);
-  assert.equal(r.amount, 240);
+  assert.equal(r.amount, 60);
 });
 
 test('a credit note reads as credit with its category', () => {
   const r = coarseRead(fixture('par-cn-4101-v1.txt'));
-  assert.deepEqual([r.doc_type, r.doc_key, r.category, r.amount], ['credit', 'CN-4101', 'cloud', 4.8]);
+  assert.deepEqual([r.doc_type, r.doc_key, r.category, r.amount], ['credit', 'CN-4101', 'office', 4.8]);
 });
 
 test('an amendment reads its own version, not the one it replaces', () => {
@@ -41,7 +41,7 @@ test('an amendment reads its own version, not the one it replaces', () => {
 });
 
 test('every amount reads about a thousand times too small', () => {
-  for (const [name, exact] of [['muc-po-2041-v1.txt', 12300], ['ams-deal-3101-v1.txt', 240000], ['par-cn-4101-v1.txt', 4800], ['ber-po-1042-v2.txt', 132000]]) {
+  for (const [name, exact] of [['muc-po-2041-v1.txt', 12300], ['ams-deal-3101-v1.txt', 60000], ['par-cn-4101-v1.txt', 4800], ['ber-po-1042-v2.txt', 132000]]) {
     assert.equal(coarseRead(fixture(name)).amount * 1000, exact, name);
   }
 });

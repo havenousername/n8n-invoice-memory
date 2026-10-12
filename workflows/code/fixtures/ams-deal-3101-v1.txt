@@ -5,11 +5,11 @@ Belegnummer: DEAL-3101
 Version: 1
 Datum: 07.10.2026
 Kostenstelle: CC-AMS-01
-Standort: Amsterdam
-Kunde: Van Dijk Logistics B.V.
-Beschreibung: Jahreslizenz Plattform, 120 Arbeitsplätze
+Standort: DataWeek Amsterdam
+Kunde: Nordzee Data B.V.
+Beschreibung: Gold-Sponsoring inklusive Keynote-Slot
 
-Auftragswert: 240.000,00 €
+Auftragswert: 60.000,00 €
 Eingereicht von: Jules
 
 Synthetischer Beleg für eine Demo. Keine echte Firma, keine echte Forderung.

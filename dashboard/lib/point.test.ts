@@ -18,7 +18,7 @@ describe('pointAnatomy', () => {
     expect(anatomy.shortId).toBe('3f2a9c1e');
   });
   it('rebuilds the ColBERT lines exactly as the n8n office view writes them, current documents only', () => {
-    expect(pointAnatomy(card).digest).toEqual(['PO-1042 v2 | 2026-10-06 | Commitment | GPU compute | Rechenwerk Systems GmbH | 132000.00 EUR | GPU servers (11x)']);
+    expect(pointAnatomy(card).digest).toEqual(['PO-1042 v2 | 2026-10-06 | Supplier order | GPU compute | Rechenwerk Systems GmbH | 132000.00 EUR | GPU servers (11x)']);
   });
   it('counts the PDFs whose German text feeds bm25 (every received file but duplicates)', () => {
     expect(pointAnatomy(card).bm25Documents).toBe(2);

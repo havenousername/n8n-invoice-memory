@@ -63,7 +63,7 @@ function describe(kind: TimelineKind, d: DocumentEntry, committed: number, over:
   switch (kind) {
     case 'amend': return `${d.doc_key} v${d.version} replaces v${(d.version ?? 2) - 1}: ${euro(d.amount)}${tail}`;
     case 'credit': return `${key} credit note: −${euro(d.amount)}, ${euro(committed)} committed${tail}`;
-    case 'deal': return `${key} deal booked: ${euro(d.amount)}, not a cost`;
+    case 'deal': return `${key} customer order booked: ${euro(d.amount)}, money in`;
     case 'duplicate': return `${d.filename ?? 'a file'} again: duplicate, not summed`;
     case 'late': return `${key} arrived after a newer version: kept, not summed`;
     default: return `${key}: +${euro(d.amount)}, ${euro(committed)} committed${tail}`;

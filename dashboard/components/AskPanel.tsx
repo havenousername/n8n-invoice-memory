@@ -6,7 +6,7 @@ import type { LensResults } from '@/lib/shape';
 import { LENSES, LensAnswer, type LensKey } from './LensColumns';
 
 export type Answer = { lenses: LensResults; took_ms: number; query: string; manager: string };
-const EXAMPLES = ['PO-1042', 'GPU servers for the launch', 'which office overspends on travel?'];
+const EXAMPLES = ['PO-1042', 'LED walls for the keynote stage', 'which event is over plan on catering?'];
 
 type Props = {
   manager: string; answer: Answer | null; onAnswer: (answer: Answer | null) => void;
@@ -55,7 +55,7 @@ export function AskPanel({ manager, answer, onAnswer, lens, onLens, open, onTogg
       </header>
       <form className="ask-form" onSubmit={(e) => ask(text, e)}>
         <label className="sr-only" htmlFor="ask-q">Question, key, or supplier</label>
-        <input id="ask-q" className="input" value={text} onChange={(e) => setText(e.target.value)} maxLength={200} placeholder="GPU servers for the launch" />
+        <input id="ask-q" className="input" value={text} onChange={(e) => setText(e.target.value)} maxLength={200} placeholder="LED walls for the keynote stage" />
         <button className="btn" type="submit" disabled={busy}>{busy ? '…' : 'Ask'}</button>
         <label className="over-field">over plan by
           <input className="input num" value={over} onChange={(e) => setOver(e.target.value)} inputMode="numeric" placeholder="any €" />
@@ -75,7 +75,7 @@ export function AskPanel({ manager, answer, onAnswer, lens, onLens, open, onTogg
         ))}
       </div>
       <div id={`lens-${lens}`} className="answer-slot">
-        {answer ? <LensAnswer lenses={answer.lenses} lens={lens} /> : <p className="hint"><b>Ask anything.</b> The same offices, stored two ways, answer differently.</p>}
+        {answer ? <LensAnswer lenses={answer.lenses} lens={lens} /> : <p className="hint"><b>Ask anything.</b> The same events, stored two ways, answer differently.</p>}
       </div>
       {answer && <p className="answer-meta"><span className="num">{(answer.took_ms / 1000).toFixed(1)} s</span> · <b>0 model calls</b></p>}
     </section>

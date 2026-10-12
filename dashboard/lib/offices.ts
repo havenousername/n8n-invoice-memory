@@ -4,8 +4,8 @@ export const CONTROLLERS: Record<string, string> = {
 };
 
 export const MANAGER_NAMES = {
-  m_anna: { name: 'Anna', region: 'Central' },
-  m_ben: { name: 'Ben', region: 'West' },
+  m_anna: { name: 'Anna', region: 'DACH' },
+  m_ben: { name: 'Ben', region: 'International' },
 } as const;
 
 export type ManagerId = keyof typeof MANAGER_NAMES;

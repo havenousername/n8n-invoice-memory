@@ -7,7 +7,7 @@ const mono = Geist_Mono({ variable: '--font-mono', subsets: ['latin'], display: 
 
 export const metadata: Metadata = {
   title: 'Q8nten · Office memory',
-  description: 'One Qdrant point per office, kept current by n8n: documents, versions, duplicates, and budgets.',
+  description: "An event agency's memory: one Qdrant point per event, kept current by n8n from every order, booking, and change.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

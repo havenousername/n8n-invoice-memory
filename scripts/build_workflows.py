@@ -368,9 +368,10 @@ def working_day(parts: Parts) -> dict:
     c.link("Wait between documents", "Loop over slots")
     for step in ("Ask the worker model", issued):
         c.link(step, "Wait between documents", output=1)
-    c.note("Workers", (660, -260), "The AI plays the controllers: it proposes the next event for an office from its recent "
-                                   "documents. Code checks every value, assigns keys and versions, and renders the PDF. "
-                                   "In real life these documents come from people and suppliers.", width=520, height=160)
+    c.note("Workers", (660, -260), "The AI plays the event producers. Code decides each slot (supplier order, sponsor or "
+                                   "exhibitor order, amendment, credit note, resend); the model writes the content; code "
+                                   "checks every value, assigns keys and versions, and renders the PDF. In real life these "
+                                   "documents come from suppliers, sponsors, and exhibitors.", width=520, height=170)
     c.note("Rejected", (2000, 420), "A rejected event (out of range, bad category, unknown key) is logged in the "
                                     "execution and skipped; the day goes on.")
     return c.build()
@@ -569,7 +570,7 @@ def _form_trigger(files: list[str]) -> tuple:
                 "fieldOptions": {"values": [{"option": file} for file in files]}}
     return ("n8n-nodes-base.formTrigger", 2.2, {
         "formTitle": "Send a document to Q8nten",
-        "formDescription": "Synthetic documents of a fictional company. Pick one; the controller who files it is known.",
+        "formDescription": "Synthetic documents of a fictional event agency. Pick one; the producer who files it is known.",
         "formFields": {"values": [dropdown]},
         "options": {},
     })

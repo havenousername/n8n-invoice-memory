@@ -20,15 +20,15 @@ REQUIRED_FIELDS = (
 )
 # Task 7's vision node sends this exact prompt.
 SYSTEM_PROMPT = (
-    "You read one German business document of Q8nten GmbH: a Bestellung (purchase commitment), a Kundenauftrag "
-    "(client deal), or a Gutschrift (credit note). Return JSON only with these keys: doc_type (cost for Bestellung, "
-    "deal for Kundenauftrag, credit for Gutschrift), doc_key (the Belegnummer, for example PO-1042), version (the "
-    "integer after Version), cost_center (the Kostenstelle, for example CC-BER-01), date (Datum, written DD.MM.YYYY "
-    "in the document, returned as YYYY-MM-DD), counterparty (the Lieferant or Kunde), category (people for Personal, "
-    "cloud for Cloud-Infrastruktur, gpu for GPU-Rechenleistung, office for Büro und Ausstattung, travel for Reisen "
-    "und Events, none for a Kundenauftrag), amount (Betrag or Auftragswert as a number: German format uses dots for "
-    "thousands and a comma for decimals, so 12.300,00 € is 12300), description_en (the Beschreibung translated to "
-    "one English sentence)."
+    "You read one German business document of Q8nten GmbH, an event agency: a Bestellung (an order to a supplier), "
+    "a Kundenauftrag (a sponsor or exhibitor order), or a Gutschrift (a supplier credit note). Return JSON only with "
+    "these keys: doc_type (cost for Bestellung, deal for Kundenauftrag, credit for Gutschrift), doc_key (the "
+    "Belegnummer, for example PO-1042), version (the integer after Version), cost_center (the Kostenstelle, for example "
+    "CC-BER-01), date (Datum, written DD.MM.YYYY in the document, returned as YYYY-MM-DD), counterparty (the Lieferant "
+    "or Kunde), category (people for Personal und Crew, cloud for Marketing und Werbung, gpu for Bühne und Technik, "
+    "office for Veranstaltungsort, travel for Catering, none for a Kundenauftrag), amount (Betrag or Auftragswert as a "
+    "number: German format uses dots for thousands and a comma for decimals, so 12.300,00 € is 12300), description_en "
+    "(the Beschreibung translated to one English sentence)."
 )
 
 

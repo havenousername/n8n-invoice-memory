@@ -33,8 +33,8 @@ test('document rows become one upsert body for the tenant shard, with budgets fr
   const [point] = body.points;
   assert.equal(point.id, uuidFromHex(IDHASH));
   assert.equal(point.payload.office_id, 'berlin');
-  assert.equal(point.payload.name, 'Berlin');
-  assert.equal(point.payload.region, 'Central');
+  assert.equal(point.payload.name, 'DevSummit Berlin');
+  assert.equal(point.payload.region, 'DACH');
   const gpu = point.payload.lines.find((l) => l.category === 'gpu');
   assert.deepEqual([gpu.budget, gpu.committed, gpu.remaining], [120000, 48000, 72000]);
   assert.equal(point.payload.summary_stage, 1, 'a narrative from another revision is stale');

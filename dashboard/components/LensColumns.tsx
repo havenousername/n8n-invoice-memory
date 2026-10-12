@@ -19,7 +19,7 @@ export function LensAnswer({ lenses, lens }: { lenses: LensResults; lens: LensKe
   const hits = lens === 'summary' ? lenses.fused : lenses.line;
   const meta = LENSES.find((l) => l.key === lens)!;
   const [best, ...rest] = hits;
-  if (!best) return <p className="empty">No office matches.</p>;
+  if (!best) return <p className="empty">No event matches.</p>;
   return (
     <div key={lens} className="answer" style={{ ['--lens-color' as string]: meta.color }}>
       <p className="answer-how">{meta.how}</p>
