@@ -59,10 +59,14 @@ function Amount({ doc, old, correction, failed }: { doc: DocumentEntry; old?: Do
   if (doc.stage === 0 && doc.kind === 'document') return <span className="hero-amount rough num" aria-label="amount not read yet">… €</span>;
   if (doc.stage === 1) return <span className="hero-amount rough num" title="rough read: German amounts are misread on purpose">{euro(doc.amount)}</span>;
   if (failed) return <span className="hero-amount num">{euro(doc.amount)}</span>;
+  const wasAmended = !!old;
   const was = old ? old.amount : correction && correction.from !== correction.to ? correction.from : null;
+  const wasTitle = wasAmended
+    ? 'the earlier version of this document, now superseded'
+    : 'rough read: German amounts are misread on purpose; the vision model corrected this one';
   return (
     <span className="amount-line">
-      {was !== null && was !== undefined && <span className="was num">{euro(was)}</span>}
+      {was !== null && was !== undefined && <span className="was num" title={wasTitle}>{euro(was)}</span>}
       <span className="hero-amount num"><CountUp value={doc.amount ?? 0} format={euro} /></span>
     </span>
   );

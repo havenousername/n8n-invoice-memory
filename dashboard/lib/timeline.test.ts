@@ -6,9 +6,9 @@ import { officeTimeline } from './timeline';
 const T0 = Date.parse('2026-10-14T09:00:00Z');
 const at = (minute: number) => new Date(T0 + minute * 60_000).toISOString();
 const office = (documents: OfficePayload['documents']) => toOfficeCard({ id: 'b', payload: berlin({
-  budget: 1_275_000,
-  lines: [line('people', 'People', 820000, 0), line('cloud', 'Cloud infrastructure', 180000, 0),
-    line('gpu', 'GPU compute', 120000, 0), line('office', 'Office and facilities', 95000, 0), line('travel', 'Travel and events', 60000, 0)],
+  budget: 770_000,
+  lines: [line('people', 'Crew and staffing', 160000, 0), line('cloud', 'Marketing', 90000, 0),
+    line('gpu', 'Stage and AV', 120000, 0), line('office', 'Venue', 220000, 0), line('travel', 'Catering', 180000, 0)],
   documents,
 }) });
 
@@ -19,7 +19,7 @@ describe('officeTimeline', () => {
       doc({ document_id: 'b', doc_key: 'PO-2', category: 'gpu', amount: 48000, received_at: at(2) }),
     ]), T0);
     expect(points.map((p) => [p.kind, p.committed])).toEqual([['start', 0], ['commit', 20000], ['commit', 68000]]);
-    expect(points[2].pct).toBeCloseTo((68000 / 1_275_000) * 100);
+    expect(points[2].pct).toBeCloseTo((68000 / 770_000) * 100);
     expect(points[0].t).toBe(T0);
   });
 
@@ -29,7 +29,7 @@ describe('officeTimeline', () => {
       doc({ document_id: 'v2', doc_key: 'PO-1042', version: 2, amount: 132000, received_at: at(5) }),
     ]), T0);
     expect(points.slice(1).map((p) => [p.kind, p.committed, p.over])).toEqual([['commit', 48000, false], ['amend', 132000, true]]);
-    expect(points[2].label).toBe('PO-1042 v2 replaces v1: 132,000 €, GPU compute over plan');
+    expect(points[2].label).toBe('PO-1042 v2 replaces v1: 132,000 €, Stage and AV over plan');
   });
 
   it('a duplicate and a deal leave the line flat; a late older version changes nothing', () => {

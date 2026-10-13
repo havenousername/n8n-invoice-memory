@@ -7,7 +7,7 @@ import { ATTENTION_MS, pickSpotlight } from './spotlight';
 const NOW = Date.parse('2026-10-14T09:10:00Z');
 const card = (fields: Partial<OfficePayload>) => toOfficeCard({ id: fields.office_id ?? 'berlin', payload: berlin(fields) });
 const event = (kind: DashboardEvent['kind'], document_id: string, atMs: number): DashboardEvent & { seenAt: number } =>
-  ({ kind, office_id: 'berlin', office_name: 'Berlin', at: '', document_id, seenAt: atMs });
+  ({ kind, office_id: 'berlin', office_name: 'DevSummit Berlin', at: '', document_id, seenAt: atMs });
 
 describe('pickSpotlight', () => {
   it('a failed read comes first', () => {

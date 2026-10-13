@@ -10,7 +10,6 @@ import { OfficesPanel, type OfficeView } from './OfficesPanel';
 import { topHits, type LensKey } from './LensColumns';
 import { PasscodeGate } from './PasscodeGate';
 import { ShardSwap } from './ShardSwap';
-import { Stage } from './Stage';
 import { Spotlight } from './Spotlight';
 import { useOfficeFeed, type Feed } from './useOfficeFeed';
 
@@ -73,7 +72,6 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
 
   return (
     <>
-    <Stage>
     <div className="shell">
       <header className="header">
         <span className="brand-name">Q8nten</span>
@@ -92,7 +90,6 @@ export function ManagerView({ initialManager }: { initialManager: ManagerId }) {
           open={askOpen} onToggle={() => setAskOpen((o) => !o)} />
       </main>
     </div>
-    </Stage>
     {askOpen && <Beams lenses={ringsOn ? liveAnswer.lenses : null} lens={lens} stamp={liveAnswer ? `${liveAnswer.at}` : null} />}
     </>
   );

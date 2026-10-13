@@ -57,7 +57,7 @@ export function OfficesPanel({ cards, now, view, onView, flashFor, lensFor }: Pr
 }
 
 type Size = { w: number; h: number };
-const PAD = { left: 52, right: 240, top: 14, bottom: 30 };
+const PAD = { left: 52, top: 14, bottom: 30 };
 
 function useSize() {
   const ref = useRef<HTMLDivElement>(null);
@@ -82,11 +82,17 @@ function OfficeChart({ cards, now, onOpen }: { cards: OfficeCard[]; now: number;
   const span = Math.max(3 * 60_000, newest - first);
   const end = Math.min(Math.max(now, newest), newest + span * 0.25);
   const start = first - span * 0.06;
+  // The right gutter holds each line's end label (name + percent). A fixed width starves the plot on a narrow
+  // panel, so it shrinks with the measured width instead, down to just enough room for a short label.
+  const padRight = Math.max(90, Math.min(240, w * 0.38));
+  const plotWidth = Math.max(0, w - PAD.left - padRight);
   const series = cards.map((card, i) => ({ card, color: OFFICE_COLORS[i], points: officeTimeline(card, start) }));
   const top = niceMax(Math.max(5, ...series.flatMap((s) => s.points.map((p) => p.pct))) * 1.15);
-  const x = (t: number) => PAD.left + ((t - start) / Math.max(1, end - start)) * (w - PAD.left - PAD.right);
+  const x = (t: number) => PAD.left + ((t - start) / Math.max(1, end - start)) * plotWidth;
   const y = (pct: number) => PAD.top + (1 - pct / top) * (h - PAD.top - PAD.bottom);
-  const ticksX = [0, 0.33, 0.66, 1].map((f) => start + f * (end - start));
+  // Fewer ticks than fit is better than labels overlapping: at least two (start and "now"), one more per 120 px.
+  const tickCount = Math.max(2, Math.min(4, Math.floor(plotWidth / 120) + 1));
+  const ticksX = Array.from({ length: tickCount }, (_, i) => start + (i / (tickCount - 1)) * (end - start));
   const labels = placeLabels(series.map((s) => ({ key: s.card.office_id, y: y(last(s.points).pct) })), h);
   return (
     <div className="chart-box" ref={box}>
@@ -94,7 +100,7 @@ function OfficeChart({ cards, now, onOpen }: { cards: OfficeCard[]; now: number;
         <svg width={w} height={h} role="img" aria-label="Percent of each event's production budget committed over time">
           {[0, top / 2, top].map((v) => (
             <g key={v}>
-              <line x1={PAD.left} x2={w - PAD.right} y1={y(v)} y2={y(v)} className="grid" />
+              <line x1={PAD.left} x2={PAD.left + plotWidth} y1={y(v)} y2={y(v)} className="grid" />
               <text x={PAD.left - 10} y={y(v) + 5} className="axis" textAnchor="end">{v}%</text>
             </g>
           ))}
