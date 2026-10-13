@@ -5,7 +5,8 @@ Belegnummer: PO-1042
 Version: 2 (ersetzt Version 1)
 Datum: 13.10.2026
 Kostenstelle: CC-BER-01
-Standort: DevSummit Berlin
+Veranstaltung: DevSummit Berlin
+Veranstaltungstermin: 10.11.2026
 Lieferant: Lichtwerk Veranstaltungstechnik GmbH
 Kategorie: Bühne und Technik
 Beschreibung: Hauptbühne erweitert: zwei LED-Wände und eine zweite Bühne für

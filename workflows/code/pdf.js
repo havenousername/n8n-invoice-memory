@@ -44,7 +44,8 @@ function documentLines(doc, office) {
     doc.version > 1 ? `Version: ${doc.version} (ersetzt Version ${doc.version - 1})` : `Version: ${doc.version}`,
     `Datum: ${germanDate(doc.date)}`,
     `Kostenstelle: ${office.cost_center}`,
-    `Standort: ${office.name}`,
+    `Veranstaltung: ${office.name}`,
+    `Veranstaltungstermin: ${germanDate(office.event_date)}`,
     isDeal ? `Kunde: ${doc.counterparty}` : `Lieferant: ${doc.counterparty}`,
   ];
   if (!isDeal) lines.push(`Kategorie: ${PDF_CATEGORY_LABELS[doc.category] || doc.category}`);

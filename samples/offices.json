@@ -9,6 +9,7 @@
   "worker_id": "w_tom",
   "worker_name": "Tom",
   "cost_center": "CC-BER-01",
+  "event_date": "2026-11-10",
   "budgets": {
    "people": 160000,
    "cloud": 90000,
@@ -27,6 +28,7 @@
   "worker_id": "w_tom",
   "worker_name": "Tom",
   "cost_center": "CC-MUC-01",
+  "event_date": "2026-11-24",
   "budgets": {
    "people": 120000,
    "cloud": 70000,
@@ -45,6 +47,7 @@
   "worker_id": "w_lena",
   "worker_name": "Lena",
   "cost_center": "CC-VIE-01",
+  "event_date": "2026-12-03",
   "budgets": {
    "people": 90000,
    "cloud": 50000,
@@ -63,6 +66,7 @@
   "worker_id": "w_jules",
   "worker_name": "Jules",
   "cost_center": "CC-AMS-01",
+  "event_date": "2026-11-17",
   "budgets": {
    "people": 110000,
    "cloud": 80000,
@@ -81,6 +85,7 @@
   "worker_id": "w_jules",
   "worker_name": "Jules",
   "cost_center": "CC-PAR-01",
+  "event_date": "2026-12-08",
   "budgets": {
    "people": 130000,
    "cloud": 100000,
@@ -99,6 +104,7 @@
   "worker_id": "w_mia",
   "worker_name": "Mia",
   "cost_center": "CC-LON-01",
+  "event_date": "2026-10-29",
   "budgets": {
    "people": 170000,
    "cloud": 140000,

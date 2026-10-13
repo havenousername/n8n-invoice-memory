@@ -9,7 +9,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>
 endobj
 4 0 obj
-<< /Length 816 >>
+<< /Length 885 >>
 stream
 BT /F2 13 Tf 56 790 Td (Q8nten GmbH) Tj ET
 BT /F2 22 Tf 56 750 Td (GUTSCHRIFT) Tj ET
@@ -18,12 +18,13 @@ BT /F1 11 Tf 56 700 Td (Belegnummer: CN-4101) Tj ET
 BT /F1 11 Tf 56 681 Td (Version: 1) Tj ET
 BT /F1 11 Tf 56 662 Td (Datum: 09.10.2026) Tj ET
 BT /F1 11 Tf 56 643 Td (Kostenstelle: CC-PAR-01) Tj ET
-BT /F1 11 Tf 56 624 Td (Standort: Paris Tech Days) Tj ET
-BT /F1 11 Tf 56 605 Td (Lieferant: Salle Lumi\350re SAS) Tj ET
-BT /F1 11 Tf 56 586 Td (Kategorie: Veranstaltungsort) Tj ET
-BT /F1 11 Tf 56 567 Td (Beschreibung: Gutschrift f\374r den stornierten Breakout-Raum) Tj ET
-BT /F2 14 Tf 56 538 Td (Betrag: 4.800,00 \200) Tj ET
-BT /F1 11 Tf 56 512 Td (Eingereicht von: Jules) Tj ET
+BT /F1 11 Tf 56 624 Td (Veranstaltung: Paris Tech Days) Tj ET
+BT /F1 11 Tf 56 605 Td (Veranstaltungstermin: 08.12.2026) Tj ET
+BT /F1 11 Tf 56 586 Td (Lieferant: Salle Lumi\350re SAS) Tj ET
+BT /F1 11 Tf 56 567 Td (Kategorie: Veranstaltungsort) Tj ET
+BT /F1 11 Tf 56 548 Td (Beschreibung: Gutschrift f\374r den stornierten Breakout-Raum) Tj ET
+BT /F2 14 Tf 56 519 Td (Betrag: 4.800,00 \200) Tj ET
+BT /F1 11 Tf 56 493 Td (Eingereicht von: Jules) Tj ET
 BT /F1 8 Tf 56 60 Td (Synthetischer Beleg f\374r eine Demo. Keine echte Firma, keine echte Forderung.) Tj ET
 endstream
 endobj
@@ -40,10 +41,10 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000251 00000 n 
-0000001118 00000 n 
-0000001215 00000 n 
+0000001187 00000 n 
+0000001284 00000 n 
 trailer
 << /Size 7 /Root 1 0 R >>
 startxref
-1317
+1386
 %%EOF

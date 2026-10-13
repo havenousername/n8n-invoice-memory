@@ -5,7 +5,8 @@ Belegnummer: PO-2041
 Version: 1
 Datum: 08.10.2026
 Kostenstelle: CC-MUC-01
-Standort: CloudTage München
+Veranstaltung: CloudTage München
+Veranstaltungstermin: 24.11.2026
 Lieferant: Isar Catering GmbH
 Kategorie: Catering
 Beschreibung: Catering für Konferenztag 1, 300 Gäste

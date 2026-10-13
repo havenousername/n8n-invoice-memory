@@ -14,14 +14,14 @@ CATEGORIES = ("people", "cloud", "gpu", "office", "travel")
 # Internal ids stay office_id/code and the five category keys; what people see is the event and the budget line.
 # Category keys -> lines: people = crew and staffing, cloud = marketing, gpu = stage and AV, office = venue,
 # travel = catering (German labels in workflows/code/pdf.js).
-# office_id: code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, budgets in CATEGORIES order
+# office_id: code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, event_date, budgets in CATEGORIES order
 _OFFICES = (
-    ("berlin", "ber", "DevSummit Berlin", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01", (160000, 90000, 120000, 220000, 180000)),
-    ("munich", "muc", "CloudTage München", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01", (120000, 70000, 150000, 160000, 140000)),
-    ("vienna", "vie", "AI Forum Wien", "DACH", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01", (90000, 50000, 80000, 120000, 100000)),
-    ("amsterdam", "ams", "DataWeek Amsterdam", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01", (110000, 80000, 100000, 150000, 130000)),
-    ("paris", "par", "Paris Tech Days", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01", (130000, 100000, 140000, 200000, 160000)),
-    ("london", "lon", "FinTech Expo London", "International", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01", (170000, 140000, 160000, 260000, 210000)),
+    ("berlin", "ber", "DevSummit Berlin", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01", "2026-11-10", (160000, 90000, 120000, 220000, 180000)),
+    ("munich", "muc", "CloudTage München", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01", "2026-11-24", (120000, 70000, 150000, 160000, 140000)),
+    ("vienna", "vie", "AI Forum Wien", "DACH", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01", "2026-12-03", (90000, 50000, 80000, 120000, 100000)),
+    ("amsterdam", "ams", "DataWeek Amsterdam", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01", "2026-11-17", (110000, 80000, 100000, 150000, 130000)),
+    ("paris", "par", "Paris Tech Days", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01", "2026-12-08", (130000, 100000, 140000, 200000, 160000)),
+    ("london", "lon", "FinTech Expo London", "International", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01", "2026-10-29", (170000, 140000, 160000, 260000, 210000)),
 )
 
 # file, office_id, doc_type, doc_key, version, date, counterparty, category, amount, description_de, description_en, role
@@ -45,8 +45,8 @@ def offices() -> list[dict]:
     return [
         {"office_id": office_id, "code": code, "name": name, "region": region, "manager_id": manager_id,
          "manager_name": manager_name, "worker_id": worker_id, "worker_name": worker_name, "cost_center": cost_center,
-         "budgets": dict(zip(CATEGORIES, budgets))}
-        for office_id, code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, budgets in _OFFICES
+         "event_date": event_date, "budgets": dict(zip(CATEGORIES, budgets))}
+        for office_id, code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, event_date, budgets in _OFFICES
     ]
 
 

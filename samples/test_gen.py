@@ -12,12 +12,12 @@ BUDGETS = {
     "london": (170000, 140000, 160000, 260000, 210000),
 }
 PEOPLE = {
-    "berlin": ("ber", "DevSummit Berlin", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01"),
-    "munich": ("muc", "CloudTage München", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01"),
-    "vienna": ("vie", "AI Forum Wien", "DACH", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01"),
-    "amsterdam": ("ams", "DataWeek Amsterdam", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01"),
-    "paris": ("par", "Paris Tech Days", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01"),
-    "london": ("lon", "FinTech Expo London", "International", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01"),
+    "berlin": ("ber", "DevSummit Berlin", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-BER-01", "2026-11-10"),
+    "munich": ("muc", "CloudTage München", "DACH", "m_anna", "Anna", "w_tom", "Tom", "CC-MUC-01", "2026-11-24"),
+    "vienna": ("vie", "AI Forum Wien", "DACH", "m_anna", "Anna", "w_lena", "Lena", "CC-VIE-01", "2026-12-03"),
+    "amsterdam": ("ams", "DataWeek Amsterdam", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-AMS-01", "2026-11-17"),
+    "paris": ("par", "Paris Tech Days", "International", "m_ben", "Ben", "w_jules", "Jules", "CC-PAR-01", "2026-12-08"),
+    "london": ("lon", "FinTech Expo London", "International", "m_ben", "Ben", "w_mia", "Mia", "CC-LON-01", "2026-10-29"),
 }
 
 
@@ -25,12 +25,12 @@ class OfficesTest(unittest.TestCase):
     def test_six_offices_with_their_people_and_budgets(self):
         by_id = {o["office_id"]: o for o in offices()}
         self.assertEqual(set(by_id), set(PEOPLE))
-        for office_id, (code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center) in PEOPLE.items():
+        for office_id, (code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, event_date) in PEOPLE.items():
             o = by_id[office_id]
             with self.subTest(office_id):
                 self.assertEqual(
-                    (o["code"], o["name"], o["region"], o["manager_id"], o["manager_name"], o["worker_id"], o["worker_name"], o["cost_center"]),
-                    (code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center),
+                    (o["code"], o["name"], o["region"], o["manager_id"], o["manager_name"], o["worker_id"], o["worker_name"], o["cost_center"], o["event_date"]),
+                    (code, name, region, manager_id, manager_name, worker_id, worker_name, cost_center, event_date),
                 )
                 self.assertEqual(tuple(o["budgets"][c] for c in CATEGORIES), BUDGETS[office_id])
 

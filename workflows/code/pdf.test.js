@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { germanMoney, germanDate, documentLines, renderPdf } = require('./pdf');
 
-const BERLIN = { office_id: 'berlin', name: 'DevSummit Berlin', cost_center: 'CC-BER-01', worker_name: 'Tom' };
+const BERLIN = { office_id: 'berlin', name: 'DevSummit Berlin', cost_center: 'CC-BER-01', worker_name: 'Tom', event_date: '2026-11-10' };
 const PO = {
   doc_type: 'cost', doc_key: 'PO-1042', version: 1, date: '2026-10-06', counterparty: 'Lichtwerk Veranstaltungstechnik GmbH',
   category: 'gpu', amount: 48000, description_de: 'Bühne, Licht und Ton für die Hauptbühne, Anzahlung',
@@ -21,6 +21,7 @@ test('German money and dates', () => {
 test('a purchase commitment carries every German label', () => {
   const lines = documentLines(PO, BERLIN).join('\n');
   for (const s of ['Q8nten GmbH', 'BESTELLUNG', 'Belegnummer: PO-1042', 'Version: 1', 'Datum: 06.10.2026', 'Kostenstelle: CC-BER-01',
+    'Veranstaltung: DevSummit Berlin', 'Veranstaltungstermin: 10.11.2026',
     'Lieferant: Lichtwerk Veranstaltungstechnik GmbH', 'Kategorie: Bühne und Technik', 'Beschreibung: Bühne, Licht und Ton für die Hauptbühne, Anzahlung',
     'Betrag: 48.000,00 €', 'Synthetischer Beleg']) {
     assert.ok(lines.includes(s), s);

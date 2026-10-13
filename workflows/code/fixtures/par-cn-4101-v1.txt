@@ -5,7 +5,8 @@ Belegnummer: CN-4101
 Version: 1
 Datum: 09.10.2026
 Kostenstelle: CC-PAR-01
-Standort: Paris Tech Days
+Veranstaltung: Paris Tech Days
+Veranstaltungstermin: 08.12.2026
 Lieferant: Salle Lumière SAS
 Kategorie: Veranstaltungsort
 Beschreibung: Gutschrift für den stornierten Breakout-Raum

@@ -5,7 +5,8 @@ Belegnummer: DEAL-3101
 Version: 1
 Datum: 07.10.2026
 Kostenstelle: CC-AMS-01
-Standort: DataWeek Amsterdam
+Veranstaltung: DataWeek Amsterdam
+Veranstaltungstermin: 17.11.2026
 Kunde: Nordzee Data B.V.
 Beschreibung: Gold-Sponsoring inklusive Keynote-Slot
 

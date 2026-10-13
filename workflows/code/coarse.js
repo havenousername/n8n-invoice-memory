@@ -2,8 +2,8 @@
 // ponytail: deliberately naive about money. Commas are dropped, so the German "12.300,00 €" reads as 12.3;
 // the vision stage corrects it. Every other field is read properly.
 
-const COARSE_LABELS = ['Belegnummer', 'Version', 'Datum', 'Kostenstelle', 'Standort', 'Lieferant', 'Kunde', 'Kategorie',
-  'Beschreibung', 'Betrag', 'Auftragswert', 'Eingereicht von', 'Synthetischer Beleg'];
+const COARSE_LABELS = ['Belegnummer', 'Version', 'Datum', 'Kostenstelle', 'Veranstaltung', 'Veranstaltungstermin', 'Lieferant', 'Kunde',
+  'Kategorie', 'Beschreibung', 'Betrag', 'Auftragswert', 'Eingereicht von', 'Synthetischer Beleg'];
 // A value ends at the end of its line or where the next label starts, so flattened text reads the same.
 const COARSE_UNTIL = `(?=\\s+(?:${COARSE_LABELS.join('|')})\\b|\\n|$)`;
 const COARSE_TYPES = { BESTELLUNG: 'cost', KUNDENAUFTRAG: 'deal', GUTSCHRIFT: 'credit' };
